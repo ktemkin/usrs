@@ -118,7 +118,7 @@ pub(crate) fn get_iokit_numeric_device_property<T: TryFrom<u64>>(
 pub(crate) fn get_iokit_string_device_property(
     device: io_iterator_t,
     property: &str,
-) -> UsbResult<String> {
+) -> UsbResult<Option<String>> {
     unsafe {
         let service_plane: *mut i8 = kIOServicePlane as *mut i8;
 
@@ -130,10 +130,9 @@ pub(crate) fn get_iokit_string_device_property(
             kIORegistryIterateRecursively | kIORegistryIterateParents,
         ) as CFStringRef;
         if raw_value.is_null() {
-            error!("Failed to read numeric device property {}!", property);
-            return Err(Error::UnspecifiedOsError);
+            return Ok(None);
         }
-        string_from_cf_string(raw_value)
+        Ok(Some(string_from_cf_string(raw_value)?))
     }
 }
 

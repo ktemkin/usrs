@@ -57,7 +57,7 @@ fn get_device_information(device: io_iterator_t) -> UsbResult<DeviceInformation>
     Ok(DeviceInformation {
         vendor_id,
         product_id,
-        serial: Some(serial),
+        serial,
     })
 }
 
