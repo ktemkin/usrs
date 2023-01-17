@@ -11,6 +11,12 @@ pub struct DeviceInformation {
 
     /// The serial string associated with the device, if we were able to get one.
     pub serial: Option<String>,
+
+    /// The vendor string associated with the device, if and only if the OS has read it.
+    pub vendor: Option<String>,
+
+    /// The product string associated with the device, if and only if the OS has read it.
+    pub product: Option<String>,
 }
 
 /// Information used to find a specific device.
@@ -21,6 +27,9 @@ pub struct DeviceSelector {
 
     /// If specified, searches for a device with the given PID.
     pub product_id: Option<u16>,
+
+    /// The serial string associated with the device.
+    pub serial: Option<String>,
 }
 
 impl DeviceSelector {

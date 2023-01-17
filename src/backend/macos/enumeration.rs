@@ -51,13 +51,20 @@ fn get_device_information(device: io_iterator_t) -> UsbResult<DeviceInformation>
     let vendor_id: u16 = get_iokit_numeric_device_property(device, "idVendor")?;
     let product_id: u16 = get_iokit_numeric_device_property(device, "idProduct")?;
 
-    // ... its serial string ...
+    // ... its string properties, where we can get them ...
     let serial = get_iokit_string_device_property(device, "USB Serial Number")?;
+    let vendor = get_iokit_string_device_property(device, "USB Vendor Name")?;
+    let product = get_iokit_string_device_property(device, "USB Product Name")?;
+
+    // ... and its internal identifier, for easy opening.
+    // FIXME: implement this
 
     Ok(DeviceInformation {
         vendor_id,
         product_id,
         serial,
+        vendor,
+        product,
     })
 }
 

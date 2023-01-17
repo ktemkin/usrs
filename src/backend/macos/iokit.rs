@@ -72,7 +72,7 @@ pub(crate) fn number_from_cf_number<T: TryFrom<u64>>(number_ref: CFNumberRef) ->
 }
 
 /// Converts a raw CFString into a Rust string.
-pub(crate) fn string_from_cf_string(string_ref: CFStringRef) -> UsbResult<String> {
+pub(crate) fn string_from_cf_string(string_ref: CFStringRef) -> UsbResult<Option<String>> {
     unsafe {
         // Promote a null pointer error to a slightly nicer panic.
         if string_ref.is_null() {
@@ -81,11 +81,10 @@ pub(crate) fn string_from_cf_string(string_ref: CFStringRef) -> UsbResult<String
 
         let c_string = CFStringGetCStringPtr(string_ref, kCFStringEncodingUTF8);
         if c_string.is_null() {
-            error!("Could not get a string value out of a CFStringRef!");
-            return Err(Error::UnspecifiedOsError);
+            return Ok(None);
         }
 
-        Ok(CStr::from_ptr(c_string).to_string_lossy().to_string())
+        Ok(Some(CStr::from_ptr(c_string).to_string_lossy().to_string()))
     }
 }
 
@@ -132,7 +131,8 @@ pub(crate) fn get_iokit_string_device_property(
         if raw_value.is_null() {
             return Ok(None);
         }
-        Ok(Some(string_from_cf_string(raw_value)?))
+
+        Ok(string_from_cf_string(raw_value)?)
     }
 }
 
