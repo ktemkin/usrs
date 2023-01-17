@@ -4,10 +4,13 @@
 #[derive(Debug)]
 pub struct DeviceInformation {
     /// The Vendor ID (idVendor) assigned to the device.
-    vendor_id: u16,
+    pub vendor_id: u16,
 
     /// The Product ID (idProduct) associated with the device.
-    product_id: u16,
+    pub product_id: u16,
+
+    /// The serial string associated with the device, if we were able to get one.
+    pub serial: Option<String>,
 }
 
 /// Information used to find a specific device.

@@ -9,9 +9,8 @@ mod macos;
 
 /// Trait that unifies all of our OS-specific backends.
 pub trait Backend {
-
     /// Returns a collection of device information for all devices present on the system.
-    fn get_devices(&self) -> Vec<DeviceInformation>;
+    fn get_devices(&self) -> UsbResult<Vec<DeviceInformation>>;
 
     // TODO:
     // - Method to open a device given its DeviceInformation.
@@ -19,9 +18,7 @@ pub trait Backend {
     // - Control write.
     // - Non-control read.
     // - Non-control write.
-
 }
-
 
 /// Creates a default backend implementation for MacOS machines.
 #[cfg(target_os = "macos")]

@@ -40,7 +40,7 @@ impl UsbHost {
         let mut matching_devices: Vec<DeviceInformation> = vec![];
 
         // Get a list of all devices...
-        let all_devices = self.backend.get_devices();
+        let all_devices = self.backend.get_devices()?;
 
         // .... and then filter it down.
         for device in all_devices {
