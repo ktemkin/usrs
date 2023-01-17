@@ -3,7 +3,7 @@
 /// Alias to simplify implementing the results of USRs functions.
 pub type UsbResult<T> = Result<T, Error>;
 
-#[derive(Debug)]
+#[derive(Debug, PartialEq)]
 pub enum Error {
     /// Error for when no devices are found that match a given selector.
     DeviceNotFound,

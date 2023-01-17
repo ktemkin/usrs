@@ -29,8 +29,11 @@ fn get_device_iterator() -> UsbResult<IoIterator> {
         let mut raw_device_iterator: io_iterator_t = 0;
         let rc =
             IOServiceGetMatchingServices(kIOMasterPortDefault, matcher, &mut raw_device_iterator);
-        if (rc != kIOReturnSuccess) || (raw_device_iterator == 0) {
+        if rc != kIOReturnSuccess {
             return Err(Error::OsError(rc as i64));
+        }
+        if raw_device_iterator == 0 {
+            return Err(Error::DeviceNotFound);
         }
 
         Ok(IoObject::new(raw_device_iterator))
@@ -64,7 +67,11 @@ pub(crate) fn enumerate_devices() -> UsbResult<Vec<DeviceInformation>> {
 
     unsafe {
         // Fetch an IOKit iterator over all devices.
-        let device_iterator = get_device_iterator()?;
+        let device_iterator = get_device_iterator();
+        if device_iterator.as_ref().err() == Some(&Error::DeviceNotFound) {
+            return Ok(devices);
+        }
+        let device_iterator = device_iterator?;
 
         let mut device;
         while {
