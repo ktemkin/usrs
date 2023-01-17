@@ -29,7 +29,7 @@
       rec {
 
         devShell = pkgs.mkShell {
-          buildInputs = buildDepends ++ (with pkgs; [
+          buildInputs = (with pkgs; [
             rustc
             cargo
             rust-analyzer
@@ -43,8 +43,6 @@
         defaultPackage = pkgs.rustPlatform.buildRustPackage {
           name = "usrs";
           src = ./.;
-
-          buildInputs = buildDepends;
 
           cargoLock = {
             lockFile = ./Cargo.lock;

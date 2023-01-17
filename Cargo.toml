@@ -7,7 +7,7 @@ edition = "2021"
 [lib]
 name = "usrs"
 
-[[bin]]
+[[example]]
 name = "lsusrs"
 
 [dependencies]
