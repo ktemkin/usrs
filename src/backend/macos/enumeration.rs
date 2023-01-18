@@ -9,15 +9,13 @@ use crate::{
 use io_kit_sys::{kIOMasterPortDefault, IOIteratorNext, IOServiceMatching};
 use io_kit_sys::{ret::kIOReturnSuccess, usb::lib::kIOUSBDeviceClassName};
 use io_kit_sys::{types::io_iterator_t, IOServiceGetMatchingServices};
+use log::debug;
 
 /// Type alias to make it clear when our u32 handle is an IoIterator. It's clear, right?
 type IoIterator = IoObject;
 
-/// Type alias to make it clear when our u32 handle is an IoService.
-type IoService = IoObject;
-
 /// IOKit iterator object that walks all connected USB devices.
-fn get_device_iterator() -> UsbResult<IoIterator> {
+pub(crate) fn get_device_iterator() -> UsbResult<IoIterator> {
     unsafe {
         // Create a dictionary containing the object-type we want to match...
         let matcher = IOServiceMatching(kIOUSBDeviceClassName);
@@ -57,7 +55,19 @@ fn get_device_information(device: io_iterator_t) -> UsbResult<DeviceInformation>
     let product = get_iokit_string_device_property(device, "USB Product Name")?;
 
     // ... and its internal identifier, for easy opening.
-    // FIXME: implement this
+    let location_id: UsbResult<u32> = get_iokit_numeric_device_property(device, "locationID");
+
+    // If we don't have a location ID, this isn't a real device to macOS.
+    //
+    // We can query its properties, but otherwise can't touch it.
+    // This is the case for e.g. root hubs.
+    if location_id.is_err() {
+        debug!(
+            "Skipping device {:04x}:{:04x} ({:?}/{:?}), as it has no location ID, and thus isn't real to us.",
+            vendor_id, product_id, vendor, product
+        );
+        return Err(Error::DeviceNotReal);
+    }
 
     Ok(DeviceInformation {
         vendor_id,
@@ -65,6 +75,8 @@ fn get_device_information(device: io_iterator_t) -> UsbResult<DeviceInformation>
         serial,
         vendor,
         product,
+        backend_numeric_location: Some(location_id.unwrap() as u64),
+        ..Default::default()
     })
 }
 
@@ -85,8 +97,17 @@ pub(crate) fn enumerate_devices() -> UsbResult<Vec<DeviceInformation>> {
             device = IOIteratorNext(device_iterator.get());
             device != 0
         } {
-            let device_info = get_device_information(device)?;
-            devices.push(device_info)
+            let device_info = get_device_information(device);
+            match device_info {
+                // If the device isn't real to the operating system, we won't consider it.
+                // (Root) hub devices, in particular, wind up enumerated to macOS, but aren't
+                // accessible in any other way. We'll skip them.
+                Err(Error::DeviceNotReal) => (),
+
+                // Otherwise, either capture the device, or propagate the error.
+                Ok(device_info) => devices.push(device_info),
+                Err(other) => return Err(other),
+            }
         }
     }
 

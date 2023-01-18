@@ -8,6 +8,10 @@ pub enum Error {
     /// Error for when no devices are found that match a given selector.
     DeviceNotFound,
 
+    /// Error representing a device that has no real USB representation;
+    /// generated if we try to open e.g. a billboard device that the OS won't talk to.
+    DeviceNotReal,
+
     /// An unspecified error, with associated OS error number.
     OsError(i64),
     UnspecifiedOsError,
@@ -19,6 +23,10 @@ impl std::fmt::Display for Error {
 
         match self {
             DeviceNotFound => write!(f, "no device found")?,
+            DeviceNotReal => write!(
+                f,
+                "tried to work with a device that isn't real to your OS (like a billboard class device)"
+            )?,
             OsError(errno) => write!(f, "operating system IO error {}", errno)?,
             UnspecifiedOsError => write!(
                 f,

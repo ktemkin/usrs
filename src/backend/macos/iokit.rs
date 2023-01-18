@@ -5,6 +5,7 @@ use std::ffi::{c_void, CStr, CString};
 use core_foundation_sys::{
     number::{kCFNumberSInt64Type, CFNumberGetValue, CFNumberRef},
     string::{kCFStringEncodingUTF8, CFStringGetCStringPtr, CFStringRef},
+    uuid::CFUUIDBytes,
 };
 use io_kit_sys::{
     kIORegistryIterateParents, kIORegistryIterateRecursively, keys::kIOServicePlane,
@@ -12,18 +13,30 @@ use io_kit_sys::{
 };
 use log::error;
 
+use super::iokit_c::{self, CFUUIDGetUUIDBytes, IOCFPlugInInterface};
 use crate::error::{Error, UsbResult};
 
-// Rustified version of the CFSTR C macro.
-macro_rules! cfstr {
-    ($string:expr) => {{
-        let cstr = CString::new($string).unwrap();
-        CFSTR(cstr.as_ptr())
-    }};
-}
-pub(crate) use cfstr;
+//
+// Support declarations.
+// These determine which versions of macOS we support, so they should be chosen carefully.
+//
 
-// Wrapper for an IOKit IO-object that automatically drops it.
+/// Alias that select the "version 500" (IOKit 5.0.0) version of UsbDevice, which means
+/// that we support macOS versions back to 10.7.3, which is currently every version that Rust
+/// supports. Use this instead of touching the iokit_c structure; this may be bumped to
+/// (compatible) newer versions of the struct as Rust's support changes.
+pub(crate) type UsbDevice = iokit_c::IOUSBDeviceStruct500;
+
+pub(crate) fn usb_device_type_id() -> CFUUIDBytes {
+    unsafe { CFUUIDGetUUIDBytes(iokit_c::kIOUSBDeviceInterfaceID500()) }
+}
+
+//
+// Wrappers around IOKit types.
+//
+
+/// Wrapper for an IOKit IO-object that automatically drops it.
+#[derive(Debug)]
 pub(crate) struct IoObject {
     object: u32,
 }
@@ -37,6 +50,12 @@ impl IoObject {
     pub(crate) fn get(&self) -> u32 {
         return self.object;
     }
+
+    /// Returns true iff the object has been created incorrectly.
+    /// Use to maintain internal consistency.
+    pub(crate) fn is_invalid(&self) -> bool {
+        return self.object == 0;
+    }
 }
 
 impl Drop for IoObject {
@@ -46,6 +65,98 @@ impl Drop for IoObject {
         }
     }
 }
+
+/// Wrapper around a **IOCFPluginInterface that automatically releases it.
+#[derive(Debug)]
+pub(crate) struct PluginInterface {
+    interface: *mut *mut IOCFPlugInInterface,
+}
+
+impl PluginInterface {
+    pub(crate) fn new(interface: *mut *mut IOCFPlugInInterface) -> Self {
+        return Self { interface };
+    }
+
+    /// Fetches the inner pointer for passing to IOKit functions.
+    pub(crate) fn get(&self) -> *mut *mut IOCFPlugInInterface {
+        return self.interface;
+    }
+}
+
+impl Drop for PluginInterface {
+    fn drop(&mut self) {
+        unsafe {
+            (*(*self.interface)).Release.unwrap()(self.interface as *mut c_void);
+        }
+    }
+}
+
+// Wrapper around a **UsbDevice that helps us poke at its innards.
+#[derive(Debug)]
+pub(crate) struct OsDevice {
+    device: *mut *mut UsbDevice,
+
+    /// True iff the device is currently open.
+    is_open: bool,
+}
+
+#[allow(dead_code)]
+impl OsDevice {
+    pub(crate) fn new(device: *mut *mut UsbDevice) -> Self {
+        return Self {
+            device,
+            is_open: false,
+        };
+    }
+
+    /// Fetches the inner pointer for passing to IOKit functions.
+    /// You probably should use one of the methods below, instead.
+    pub(crate) fn get(&self) -> *mut *mut UsbDevice {
+        return self.device;
+    }
+
+    /// Closes the active USB device.
+    pub fn close(&mut self) {
+        // If we're already closed, we're done!
+        if !self.is_open {
+            return;
+        }
+
+        // Otherwise, close ourselves.
+        unsafe {
+            let close = (**self.device).USBDeviceClose.unwrap();
+            close(self.device as *mut c_void);
+
+            self.is_open = false;
+        }
+    }
+}
+
+impl Drop for OsDevice {
+    fn drop(&mut self) {
+        unsafe {
+            // If the device is still open, close it...
+            self.close();
+
+            // ... and decrease macOS's refcount, so the device can be dealloc'd.
+            let release = (**self.device).Release.unwrap();
+            release(self.device as *mut c_void);
+        }
+    }
+}
+
+//
+// Helpers for working with CoreFoundation / IOKit types.
+//
+
+/// Rustified version of the CFSTR C macro.
+macro_rules! cfstr {
+    ($string:expr) => {{
+        let cstr = CString::new($string).unwrap();
+        CFSTR(cstr.as_ptr())
+    }};
+}
+pub(crate) use cfstr;
 
 /// Converts a CFNumberRef to a Rust integer.
 pub(crate) fn number_from_cf_number<T: TryFrom<u64>>(number_ref: CFNumberRef) -> UsbResult<T> {
@@ -135,27 +246,3 @@ pub(crate) fn get_iokit_string_device_property(
         Ok(string_from_cf_string(raw_value)?)
     }
 }
-
-// Wrapper for an IOKit IO-pointer that automatically drops it.
-/*
-pub(crate) struct IoReference<T> {
-    reference: T,
-}
-
-impl<T> IoReference<T> {
-    pub(crate) fn new(reference: T) -> Self {
-        return IoReference { reference };
-    }
-
-    /// Fetches the inner pointer for passing to IOKit functions.
-    pub(crate) fn get(&self) -> T {
-        return self.reference;
-    }
-}
-
-impl<T> Drop for IoReference {
-    fn drop(&mut self) {
-        unsafe {}
-    }
-}
-*/
