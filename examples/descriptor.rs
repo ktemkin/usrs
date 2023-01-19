@@ -15,6 +15,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     // ... open it ...
     let mut t5_headset = open(&t5_headset_info)?;
+    dbg!(&t5_headset);
 
     // ... and ask for its device descriptor.
     let descriptor = t5_headset.read_standard_descriptor(DescriptorType::Device, 0)?;

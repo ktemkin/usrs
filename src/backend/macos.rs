@@ -14,7 +14,9 @@ use super::{Backend, BackendDevice, DeviceInformation};
 use crate::{backend::macos::iokit_c::IOUSBDevRequestTO, device::Device, error::UsbResult, Error};
 
 mod device;
+mod endpoint;
 mod enumeration;
+mod interface;
 mod iokit;
 mod iokit_c;
 

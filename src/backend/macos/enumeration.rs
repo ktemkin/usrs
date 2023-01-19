@@ -1,6 +1,8 @@
 //! Routines for querying IOKit for USB devices.
 
-use super::iokit::{get_iokit_numeric_device_property, get_iokit_string_device_property, IoObject};
+use super::iokit::{
+    get_iokit_numeric_device_property, get_iokit_string_device_property, IoIterator, IoObject,
+};
 use crate::{
     error::{Error, UsbResult},
     DeviceInformation,
@@ -10,9 +12,6 @@ use io_kit_sys::{kIOMasterPortDefault, IOIteratorNext, IOServiceMatching};
 use io_kit_sys::{ret::kIOReturnSuccess, usb::lib::kIOUSBDeviceClassName};
 use io_kit_sys::{types::io_iterator_t, IOServiceGetMatchingServices};
 use log::debug;
-
-/// Type alias to make it clear when our u32 handle is an IoIterator. It's clear, right?
-type IoIterator = IoObject;
 
 /// IOKit iterator object that walks all connected USB devices.
 pub(crate) fn get_device_iterator() -> UsbResult<IoIterator> {

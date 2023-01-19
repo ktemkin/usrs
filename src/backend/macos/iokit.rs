@@ -14,8 +14,9 @@ use io_kit_sys::{
 use log::error;
 
 use super::iokit_c::{
-    self, kIOUSBNoAsyncPortErr, kIOUSBPipeStalled, kIOUSBTransactionTimeout, kIOUSBUnknownPipeErr,
-    CFUUIDGetUUIDBytes, IOCFPlugInInterface, IOUSBDevRequest, IOUSBDevRequestTO,
+    self, kIOUSBFindInterfaceDontCare, kIOUSBNoAsyncPortErr, kIOUSBPipeStalled,
+    kIOUSBTransactionTimeout, kIOUSBUnknownPipeErr, CFUUIDGetUUIDBytes, IOCFPlugInInterface,
+    IOUSBDevRequest, IOUSBDevRequestTO, IOUSBFindInterfaceRequest, UInt16, UInt8,
 };
 use crate::error::{self, Error, UsbResult};
 
@@ -29,14 +30,45 @@ use crate::error::{self, Error, UsbResult};
 /// supports. Use this instead of touching the iokit_c structure; this may be bumped to
 /// (compatible) newer versions of the struct as Rust's support changes.
 pub(crate) type UsbDevice = iokit_c::IOUSBDeviceStruct500;
+pub(crate) type UsbInterface = iokit_c::IOUSBInterfaceStruct500;
 
 pub(crate) fn usb_device_type_id() -> CFUUIDBytes {
     unsafe { CFUUIDGetUUIDBytes(iokit_c::kIOUSBDeviceInterfaceID500()) }
 }
 
+pub(crate) fn usb_interface_type_id() -> CFUUIDBytes {
+    unsafe { CFUUIDGetUUIDBytes(iokit_c::kIOUSBInterfaceInterfaceID500()) }
+}
+
+//
+// Helpers for working with IOKit types.
+//
+
+/// Helper for calling IOKit function pointers.
+macro_rules! call_unsafe_iokit_function {
+    ($ptr:expr, $function:ident) => {{
+        unsafe {
+            let func = (**$ptr).$function.expect("function pointer from IOKit was null");
+            func($ptr as *mut c_void)
+        }
+    }};
+    ($ptr:expr, $function:ident, $($args:expr),*) => {{
+        unsafe {
+            let func = (**$ptr).$function.expect("function pointer from IOKit was null");
+            func($ptr as *mut c_void, $($args),*)
+        }
+    }};
+}
+
 //
 // Wrappers around IOKit types.
 //
+
+/// Type alias to make it clear when our u32 handle is an IoIterator. It's clear, right?
+pub(crate) type IoIterator = IoObject;
+
+/// Type alias to make it clear(er) when our u32 handle is a handle to an IO service.
+pub(crate) type IoService = IoObject;
 
 /// Wrapper for an IOKit IO-object that automatically drops it.
 #[derive(Debug)]
@@ -88,9 +120,7 @@ impl PluginInterface {
 
 impl Drop for PluginInterface {
     fn drop(&mut self) {
-        unsafe {
-            (*(*self.interface)).Release.unwrap()(self.interface as *mut c_void);
-        }
+        call_unsafe_iokit_function!(self.interface, Release);
     }
 }
 
@@ -103,22 +133,6 @@ pub(crate) struct OsDevice {
     is_open: bool,
 }
 
-/// Helper for calling IOKit function pointers.
-macro_rules! call_unsafe_iokit_function {
-    ($ptr:expr, $function:ident) => {{
-        unsafe {
-            let func = (**$ptr).$function.expect("function pointer from IOKit was null");
-            func($ptr as *mut c_void)
-        }
-    }};
-    ($ptr:expr, $function:ident, $($args:expr),*) => {{
-        unsafe {
-            let func = (**$ptr).$function.expect("function pointer from IOKit was null");
-            func($ptr as *mut c_void, $($args),*)
-        }
-    }};
-}
-
 #[allow(dead_code)]
 impl OsDevice {
     pub(crate) fn new(device: *mut *mut UsbDevice) -> Self {
@@ -128,26 +142,18 @@ impl OsDevice {
         }
     }
 
-    /// Fetches the inner pointer for passing to IOKit functions.
-    /// You probably should use one of the methods below, instead.
-    pub(crate) fn get(&self) -> *mut *mut UsbDevice {
-        self.device
-    }
-
-    /// Helper that fetches the inner device in the form macOS APIs like it.
-    fn get_void_ptr(&self) -> *mut c_void {
-        self.device as *mut c_void
-    }
-
     /// Opens the device, allowing the other functions on this type to be used.
-    fn open(&mut self) -> UsbResult<()> {
+    pub fn open(&mut self) -> UsbResult<()> {
         // If we're already open, we're done!
         if self.is_open {
             return Ok(());
         }
 
         // Otherwise, open the device.
-        UsbResult::from_io_return(call_unsafe_iokit_function!(self.device, USBDeviceOpen))
+        UsbResult::from_io_return(call_unsafe_iokit_function!(self.device, USBDeviceOpen))?;
+
+        self.is_open = true;
+        Ok(())
     }
 
     /// Applies a configuration to the device.
@@ -202,26 +208,211 @@ impl OsDevice {
         ))
     }
 
+    /// Returns an IOKit iterator that can be used to iterate over all interfaces on this device.
+    pub fn create_interface_iterator(&mut self) -> UsbResult<IoObject> {
+        let mut iterator: io_iterator_t = 0;
+
+        // For our purposes, we don't want macOS to filter the interface list
+        // by anything in particular (e.g. by device class), so we'll just construct
+        // a big ol' list of Don't Cares.
+        let mut dont_care = IOUSBFindInterfaceRequest {
+            bInterfaceClass: kIOUSBFindInterfaceDontCare,
+            bInterfaceSubClass: kIOUSBFindInterfaceDontCare,
+            bInterfaceProtocol: kIOUSBFindInterfaceDontCare,
+            bAlternateSetting: kIOUSBFindInterfaceDontCare,
+        };
+
+        // Finally, actually ask macOS to give us that iterator...
+        UsbResult::from_io_return(call_unsafe_iokit_function!(
+            self.device,
+            CreateInterfaceIterator,
+            &mut dont_care,
+            &mut iterator
+        ))?;
+
+        // ... and pack it all up nicely in an IoObject for our user.
+        Ok(IoObject::new(iterator))
+    }
+
     /// Closes the active USB device.
     pub fn close(&mut self) {
         if !self.is_open {
             return;
         }
 
-        call_unsafe_iokit_function!(self.device, USBDeviceClose);
+        if call_unsafe_iokit_function!(self.device, USBDeviceClose) == kIOReturnSuccess {
+            self.is_open = false;
+        }
     }
 }
 
 impl Drop for OsDevice {
     fn drop(&mut self) {
-        unsafe {
-            // If the device is still open, close it...
-            self.close();
+        // If the device is still open, close it...
+        self.close();
 
-            // ... and decrease macOS's refcount, so the device can be dealloc'd.
-            let release = (**self.device).Release.unwrap();
-            release(self.device as *mut c_void);
+        // ... and decrease macOS's refcount, so the device can be dealloc'd.
+        call_unsafe_iokit_function!(self.device, Release);
+    }
+}
+
+/// Helper for fetching endpoint metadata from our OsInterface.
+/// At some point, a caller will convert this up into OS-agnostic metadata.
+#[allow(dead_code)]
+pub(crate) struct EndpointMetadata {
+    pub(crate) direction: u8,
+    pub(crate) number: u8,
+    pub(crate) transfer_type: u8,
+    pub(crate) max_packet_size: u16,
+    pub(crate) interval: u8,
+    pub(crate) max_burst: u8,
+    pub(crate) mult: u8,
+    pub(crate) bytes_per_interval: u16,
+}
+
+/// Wrapper around a **UsbInterface that helps us poke at its contained function pointers.
+#[derive(Debug)]
+pub(crate) struct OsInterface {
+    interface: *mut *mut UsbInterface,
+
+    /// The interface number associated with the given OS interface.
+    interface_number: u8,
+
+    /// If set, all function calls on this interface will return PermissionDenied.
+    ///
+    /// This allows us to act like permission is being denied on the individual calls,
+    /// rather than on creating the interface object. This makes the macOS backend have
+    /// the same behavior as other backends, which don't try to "open" interfaces in an early step.
+    deny_all: bool,
+
+    /// True iff the interface is currently open.
+    is_open: bool,
+}
+
+#[allow(dead_code)]
+impl OsInterface {
+    pub(crate) fn new(interface: *mut *mut UsbInterface, interface_number: u8) -> Self {
+        Self {
+            interface,
+            interface_number,
+            deny_all: false,
+            is_open: false,
         }
+    }
+
+    pub(crate) fn new_denying_placeholder(interface_number: u8) -> Self {
+        Self {
+            interface: std::ptr::null_mut(),
+            interface_number,
+            deny_all: true,
+            is_open: false,
+        }
+    }
+
+    pub fn interface_number(&self) -> UsbResult<u8> {
+        Ok(self.interface_number)
+    }
+
+    /// Opens the interface, allowing the other functions on this type to be used.
+    pub fn open(&mut self) -> UsbResult<()> {
+        if self.deny_all {
+            return Err(Error::PermissionDenied);
+        }
+
+        // If we're already open, we're done!
+        if self.is_open {
+            return Ok(());
+        }
+
+        UsbResult::from_io_return(call_unsafe_iokit_function!(
+            self.interface,
+            USBInterfaceOpen
+        ))
+    }
+
+    /// Returns the number of endpoints associated with the interface.
+    pub fn endpoint_count(&mut self) -> UsbResult<u8> {
+        let mut count: UInt8 = 0;
+
+        // If we won't allow access to any actual functions,
+        // lie that we have no endpoints, for lack of a better thing to do.
+        if self.deny_all {
+            return Ok(0);
+        }
+
+        UsbResult::from_io_return(call_unsafe_iokit_function!(
+            self.interface,
+            GetNumEndpoints,
+            &mut count
+        ))?;
+
+        Ok(count as u8)
+    }
+
+    pub fn endpoint_properties(&mut self, pipe_ref: u8) -> UsbResult<EndpointMetadata> {
+        if self.deny_all {
+            return Err(Error::PermissionDenied);
+        }
+
+        let mut direction: UInt8 = 0;
+        let mut number: UInt8 = 0;
+        let mut transfer_type: UInt8 = 0;
+        let mut max_packet_size: UInt16 = 0;
+        let mut interval: UInt8 = 0;
+        let mut max_burst: UInt8 = 0;
+        let mut mult: UInt8 = 0;
+        let mut bytes_per_interval: UInt16 = 0;
+
+        // We have entered hell, it's real, and it is this IOKit function signature.
+        UsbResult::from_io_return(call_unsafe_iokit_function!(
+            self.interface,
+            GetPipePropertiesV2,
+            pipe_ref,
+            &mut direction,
+            &mut number,
+            &mut transfer_type,
+            &mut max_packet_size,
+            &mut interval,
+            &mut max_burst,
+            &mut mult,
+            &mut bytes_per_interval
+        ))?;
+
+        Ok(EndpointMetadata {
+            direction,
+            number,
+            transfer_type,
+            max_packet_size,
+            interval,
+            max_burst,
+            mult,
+            bytes_per_interval,
+        })
+    }
+
+    /// Closes the active USB interface.
+    pub fn close(&mut self) {
+        if !self.is_open {
+            return;
+        }
+
+        if self.deny_all {
+            panic!("internal consistency: somehow, we have an open deny_all interface? what have we _done_");
+        }
+
+        if call_unsafe_iokit_function!(self.interface, USBInterfaceClose) == kIOReturnSuccess {
+            self.is_open = false;
+        }
+    }
+}
+
+impl Drop for OsInterface {
+    fn drop(&mut self) {
+        // If the device is still open, close it...
+        self.close();
+
+        // ... and decrease macOS's refcount, so the device can be dealloc'd.
+        call_unsafe_iokit_function!(self.interface, Release);
     }
 }
 
@@ -264,7 +455,7 @@ pub(crate) trait IOKitEmptyResultExtension {
 }
 
 pub(crate) trait IOKitResultExtension<T> {
-    fn from_iokit_value(io_return: IOReturn, ok_value: T) -> UsbResult<T>;
+    fn from_io_return_and_value(io_return: IOReturn, ok_value: T) -> UsbResult<T>;
 }
 
 impl IOKitEmptyResultExtension for UsbResult<()> {
@@ -281,7 +472,7 @@ impl IOKitEmptyResultExtension for UsbResult<()> {
 
 impl<T> IOKitResultExtension<T> for UsbResult<T> {
     /// Creates s UsbResult from an IOKit return code.
-    fn from_iokit_value(io_return: IOReturn, ok_value: T) -> UsbResult<T> {
+    fn from_io_return_and_value(io_return: IOReturn, ok_value: T) -> UsbResult<T> {
         // If this wasn't a success, translate our error.
         if io_return != kIOReturnSuccess {
             Err(io_return_to_error(io_return))

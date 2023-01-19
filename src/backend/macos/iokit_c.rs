@@ -18,7 +18,7 @@ use core_foundation_sys::{
 };
 use io_kit_sys::{
     ret::IOReturn,
-    types::{io_iterator_t, io_service_t},
+    types::{io_iterator_t, io_service_t, IOByteCount},
     IOAsyncCallback1,
 };
 
@@ -55,23 +55,25 @@ pub(crate) const kIOUSBTooManyTransactionsPending: c_int = SYS_IOKIT | SUB_IOKIT
 pub(crate) const kIOUSBTransactionReturned: c_int = SYS_IOKIT | SUB_IOKIT_USB | 0x50;
 pub(crate) const kIOUSBTransactionTimeout: c_int = SYS_IOKIT | SUB_IOKIT_USB | 0x51;
 
+pub(crate) const kIOUSBFindInterfaceDontCare: UInt16 = 0xFFFF;
+
 //
 
 //
 // Type aliases.
 //
-type REFIID = CFUUIDBytes;
-type LPVOID = *mut c_void;
-type HRESULT = SInt32;
-type UInt8 = ::std::os::raw::c_uchar;
-type UInt16 = ::std::os::raw::c_ushort;
-type UInt32 = ::std::os::raw::c_uint;
-type UInt64 = ::std::os::raw::c_ulonglong;
-type ULONG = ::std::os::raw::c_ulong;
-type kern_return_t = ::std::os::raw::c_int;
-type USBDeviceAddress = UInt16;
-type AbsoluteTime = UnsignedWide;
-type Boolean = std::os::raw::c_uchar;
+pub(crate) type REFIID = CFUUIDBytes;
+pub(crate) type LPVOID = *mut c_void;
+pub(crate) type HRESULT = SInt32;
+pub(crate) type UInt8 = ::std::os::raw::c_uchar;
+pub(crate) type UInt16 = ::std::os::raw::c_ushort;
+pub(crate) type UInt32 = ::std::os::raw::c_uint;
+pub(crate) type UInt64 = ::std::os::raw::c_ulonglong;
+pub(crate) type ULONG = ::std::os::raw::c_ulong;
+pub(crate) type kern_return_t = ::std::os::raw::c_int;
+pub(crate) type USBDeviceAddress = UInt16;
+pub(crate) type AbsoluteTime = UnsignedWide;
+pub(crate) type Boolean = std::os::raw::c_uchar;
 
 #[repr(C)]
 #[derive(Debug, Copy, Clone)]
@@ -122,6 +124,30 @@ pub struct IOUSBDevRequestTO {
     pub wLenDone: UInt32,
     pub noDataTimeout: UInt32,
     pub completionTimeout: UInt32,
+}
+
+#[repr(C)]
+#[derive(Debug, Copy, Clone)]
+pub struct IOUSBIsocFrame {
+    pub frStatus: IOReturn,
+    pub frReqCount: UInt16,
+    pub frActCount: UInt16,
+}
+
+#[repr(C)]
+#[derive(Debug, Copy, Clone)]
+pub struct IOUSBLowLatencyIsocFrame {
+    pub frStatus: IOReturn,
+    pub frReqCount: UInt16,
+    pub frActCount: UInt16,
+    pub frTimeStamp: AbsoluteTime,
+}
+
+#[repr(C, packed)]
+#[derive(Debug, Copy, Clone)]
+pub struct IOUSBDescriptorHeader {
+    pub bLength: u8,
+    pub bDescriptorType: u8,
 }
 
 #[repr(C)]
@@ -221,6 +247,30 @@ pub fn kIOUsbDeviceUserClientTypeID() -> CFUUIDRef {
     }
 }
 
+pub fn kIOUsbInterfaceUserClientTypeID() -> CFUUIDRef {
+    unsafe {
+        CFUUIDGetConstantUUIDWithBytes(
+            std::ptr::null(),
+            0x2d,
+            0x97,
+            0x86,
+            0xc6,
+            0x9e,
+            0xf3,
+            0x11,
+            0xD4,
+            0xad,
+            0x51,
+            0x00,
+            0x0a,
+            0x27,
+            0x05,
+            0x28,
+            0x61,
+        )
+    }
+}
+
 pub fn kIOCFPlugInInterfaceID() -> CFUUIDRef {
     unsafe {
         CFUUIDGetConstantUUIDWithBytes(
@@ -265,6 +315,30 @@ pub fn kIOUSBDeviceInterfaceID500() -> CFUUIDRef {
             0xEA,
             0xE1,
             0x3B,
+        )
+    }
+}
+
+pub fn kIOUSBInterfaceInterfaceID500() -> CFUUIDRef {
+    unsafe {
+        CFUUIDGetConstantUUIDWithBytes(
+            kCFAllocatorSystemDefault,
+            0x6C,
+            0x0D,
+            0x38,
+            0xC3,
+            0xB0,
+            0x93,
+            0x4E,
+            0xA7,
+            0x80,
+            0x9B,
+            0x09,
+            0xFB,
+            0x5D,
+            0xDD,
+            0xAC,
+            0x16,
         )
     }
 }
@@ -509,3 +583,410 @@ pub struct IOUSBDeviceStruct500 {
     >,
 }
 pub type IOUSBDeviceInterface500 = IOUSBDeviceStruct500;
+
+#[repr(C)]
+#[derive(Debug, Copy, Clone)]
+pub struct IOUSBInterfaceStruct500 {
+    pub _reserved: *mut ::std::os::raw::c_void,
+    pub QueryInterface: ::std::option::Option<
+        unsafe extern "C" fn(
+            thisPointer: *mut ::std::os::raw::c_void,
+            iid: REFIID,
+            ppv: *mut LPVOID,
+        ) -> HRESULT,
+    >,
+    pub AddRef: ::std::option::Option<
+        unsafe extern "C" fn(thisPointer: *mut ::std::os::raw::c_void) -> ULONG,
+    >,
+    pub Release: ::std::option::Option<
+        unsafe extern "C" fn(thisPointer: *mut ::std::os::raw::c_void) -> ULONG,
+    >,
+    pub CreateInterfaceAsyncEventSource: ::std::option::Option<
+        unsafe extern "C" fn(
+            self_: *mut ::std::os::raw::c_void,
+            source: *mut CFRunLoopSourceRef,
+        ) -> IOReturn,
+    >,
+    pub GetInterfaceAsyncEventSource: ::std::option::Option<
+        unsafe extern "C" fn(self_: *mut ::std::os::raw::c_void) -> CFRunLoopSourceRef,
+    >,
+    pub CreateInterfaceAsyncPort: ::std::option::Option<
+        unsafe extern "C" fn(
+            self_: *mut ::std::os::raw::c_void,
+            port: *mut mach_port_t,
+        ) -> IOReturn,
+    >,
+    pub GetInterfaceAsyncPort: ::std::option::Option<
+        unsafe extern "C" fn(self_: *mut ::std::os::raw::c_void) -> mach_port_t,
+    >,
+    pub USBInterfaceOpen:
+        ::std::option::Option<unsafe extern "C" fn(self_: *mut ::std::os::raw::c_void) -> IOReturn>,
+    pub USBInterfaceClose:
+        ::std::option::Option<unsafe extern "C" fn(self_: *mut ::std::os::raw::c_void) -> IOReturn>,
+    pub GetInterfaceClass: ::std::option::Option<
+        unsafe extern "C" fn(self_: *mut ::std::os::raw::c_void, intfClass: *mut UInt8) -> IOReturn,
+    >,
+    pub GetInterfaceSubClass: ::std::option::Option<
+        unsafe extern "C" fn(
+            self_: *mut ::std::os::raw::c_void,
+            intfSubClass: *mut UInt8,
+        ) -> IOReturn,
+    >,
+    pub GetInterfaceProtocol: ::std::option::Option<
+        unsafe extern "C" fn(
+            self_: *mut ::std::os::raw::c_void,
+            intfProtocol: *mut UInt8,
+        ) -> IOReturn,
+    >,
+    pub GetDeviceVendor: ::std::option::Option<
+        unsafe extern "C" fn(
+            self_: *mut ::std::os::raw::c_void,
+            devVendor: *mut UInt16,
+        ) -> IOReturn,
+    >,
+    pub GetDeviceProduct: ::std::option::Option<
+        unsafe extern "C" fn(
+            self_: *mut ::std::os::raw::c_void,
+            devProduct: *mut UInt16,
+        ) -> IOReturn,
+    >,
+    pub GetDeviceReleaseNumber: ::std::option::Option<
+        unsafe extern "C" fn(
+            self_: *mut ::std::os::raw::c_void,
+            devRelNum: *mut UInt16,
+        ) -> IOReturn,
+    >,
+    pub GetConfigurationValue: ::std::option::Option<
+        unsafe extern "C" fn(self_: *mut ::std::os::raw::c_void, configVal: *mut UInt8) -> IOReturn,
+    >,
+    pub GetInterfaceNumber: ::std::option::Option<
+        unsafe extern "C" fn(
+            self_: *mut ::std::os::raw::c_void,
+            intfNumber: *mut UInt8,
+        ) -> IOReturn,
+    >,
+    pub GetAlternateSetting: ::std::option::Option<
+        unsafe extern "C" fn(
+            self_: *mut ::std::os::raw::c_void,
+            intfAltSetting: *mut UInt8,
+        ) -> IOReturn,
+    >,
+    pub GetNumEndpoints: ::std::option::Option<
+        unsafe extern "C" fn(
+            self_: *mut ::std::os::raw::c_void,
+            intfNumEndpoints: *mut UInt8,
+        ) -> IOReturn,
+    >,
+    pub GetLocationID: ::std::option::Option<
+        unsafe extern "C" fn(
+            self_: *mut ::std::os::raw::c_void,
+            locationID: *mut UInt32,
+        ) -> IOReturn,
+    >,
+    pub GetDevice: ::std::option::Option<
+        unsafe extern "C" fn(
+            self_: *mut ::std::os::raw::c_void,
+            device: *mut io_service_t,
+        ) -> IOReturn,
+    >,
+    pub SetAlternateInterface: ::std::option::Option<
+        unsafe extern "C" fn(
+            self_: *mut ::std::os::raw::c_void,
+            alternateSetting: UInt8,
+        ) -> IOReturn,
+    >,
+    pub GetBusFrameNumber: ::std::option::Option<
+        unsafe extern "C" fn(
+            self_: *mut ::std::os::raw::c_void,
+            frame: *mut UInt64,
+            atTime: *mut AbsoluteTime,
+        ) -> IOReturn,
+    >,
+    pub ControlRequest: ::std::option::Option<
+        unsafe extern "C" fn(
+            self_: *mut ::std::os::raw::c_void,
+            pipeRef: UInt8,
+            req: *mut IOUSBDevRequest,
+        ) -> IOReturn,
+    >,
+    pub ControlRequestAsync: ::std::option::Option<
+        unsafe extern "C" fn(
+            self_: *mut ::std::os::raw::c_void,
+            pipeRef: UInt8,
+            req: *mut IOUSBDevRequest,
+            callback: IOAsyncCallback1,
+            refCon: *mut ::std::os::raw::c_void,
+        ) -> IOReturn,
+    >,
+    pub GetPipeProperties: ::std::option::Option<
+        unsafe extern "C" fn(
+            self_: *mut ::std::os::raw::c_void,
+            pipeRef: UInt8,
+            direction: *mut UInt8,
+            number: *mut UInt8,
+            transferType: *mut UInt8,
+            maxPacketSize: *mut UInt16,
+            interval: *mut UInt8,
+        ) -> IOReturn,
+    >,
+    pub GetPipeStatus: ::std::option::Option<
+        unsafe extern "C" fn(self_: *mut ::std::os::raw::c_void, pipeRef: UInt8) -> IOReturn,
+    >,
+    pub AbortPipe: ::std::option::Option<
+        unsafe extern "C" fn(self_: *mut ::std::os::raw::c_void, pipeRef: UInt8) -> IOReturn,
+    >,
+    pub ResetPipe: ::std::option::Option<
+        unsafe extern "C" fn(self_: *mut ::std::os::raw::c_void, pipeRef: UInt8) -> IOReturn,
+    >,
+    pub ClearPipeStall: ::std::option::Option<
+        unsafe extern "C" fn(self_: *mut ::std::os::raw::c_void, pipeRef: UInt8) -> IOReturn,
+    >,
+    pub ReadPipe: ::std::option::Option<
+        unsafe extern "C" fn(
+            self_: *mut ::std::os::raw::c_void,
+            pipeRef: UInt8,
+            buf: *mut ::std::os::raw::c_void,
+            size: *mut UInt32,
+        ) -> IOReturn,
+    >,
+    pub WritePipe: ::std::option::Option<
+        unsafe extern "C" fn(
+            self_: *mut ::std::os::raw::c_void,
+            pipeRef: UInt8,
+            buf: *mut ::std::os::raw::c_void,
+            size: UInt32,
+        ) -> IOReturn,
+    >,
+    pub ReadPipeAsync: ::std::option::Option<
+        unsafe extern "C" fn(
+            self_: *mut ::std::os::raw::c_void,
+            pipeRef: UInt8,
+            buf: *mut ::std::os::raw::c_void,
+            size: UInt32,
+            callback: IOAsyncCallback1,
+            refcon: *mut ::std::os::raw::c_void,
+        ) -> IOReturn,
+    >,
+    pub WritePipeAsync: ::std::option::Option<
+        unsafe extern "C" fn(
+            self_: *mut ::std::os::raw::c_void,
+            pipeRef: UInt8,
+            buf: *mut ::std::os::raw::c_void,
+            size: UInt32,
+            callback: IOAsyncCallback1,
+            refcon: *mut ::std::os::raw::c_void,
+        ) -> IOReturn,
+    >,
+    pub ReadIsochPipeAsync: ::std::option::Option<
+        unsafe extern "C" fn(
+            self_: *mut ::std::os::raw::c_void,
+            pipeRef: UInt8,
+            buf: *mut ::std::os::raw::c_void,
+            frameStart: UInt64,
+            numFrames: UInt32,
+            frameList: *mut IOUSBIsocFrame,
+            callback: IOAsyncCallback1,
+            refcon: *mut ::std::os::raw::c_void,
+        ) -> IOReturn,
+    >,
+    pub WriteIsochPipeAsync: ::std::option::Option<
+        unsafe extern "C" fn(
+            self_: *mut ::std::os::raw::c_void,
+            pipeRef: UInt8,
+            buf: *mut ::std::os::raw::c_void,
+            frameStart: UInt64,
+            numFrames: UInt32,
+            frameList: *mut IOUSBIsocFrame,
+            callback: IOAsyncCallback1,
+            refcon: *mut ::std::os::raw::c_void,
+        ) -> IOReturn,
+    >,
+    pub ControlRequestTO: ::std::option::Option<
+        unsafe extern "C" fn(
+            self_: *mut ::std::os::raw::c_void,
+            pipeRef: UInt8,
+            req: *mut IOUSBDevRequestTO,
+        ) -> IOReturn,
+    >,
+    pub ControlRequestAsyncTO: ::std::option::Option<
+        unsafe extern "C" fn(
+            self_: *mut ::std::os::raw::c_void,
+            pipeRef: UInt8,
+            req: *mut IOUSBDevRequestTO,
+            callback: IOAsyncCallback1,
+            refCon: *mut ::std::os::raw::c_void,
+        ) -> IOReturn,
+    >,
+    pub ReadPipeTO: ::std::option::Option<
+        unsafe extern "C" fn(
+            self_: *mut ::std::os::raw::c_void,
+            pipeRef: UInt8,
+            buf: *mut ::std::os::raw::c_void,
+            size: *mut UInt32,
+            noDataTimeout: UInt32,
+            completionTimeout: UInt32,
+        ) -> IOReturn,
+    >,
+    pub WritePipeTO: ::std::option::Option<
+        unsafe extern "C" fn(
+            self_: *mut ::std::os::raw::c_void,
+            pipeRef: UInt8,
+            buf: *mut ::std::os::raw::c_void,
+            size: UInt32,
+            noDataTimeout: UInt32,
+            completionTimeout: UInt32,
+        ) -> IOReturn,
+    >,
+    pub ReadPipeAsyncTO: ::std::option::Option<
+        unsafe extern "C" fn(
+            self_: *mut ::std::os::raw::c_void,
+            pipeRef: UInt8,
+            buf: *mut ::std::os::raw::c_void,
+            size: UInt32,
+            noDataTimeout: UInt32,
+            completionTimeout: UInt32,
+            callback: IOAsyncCallback1,
+            refcon: *mut ::std::os::raw::c_void,
+        ) -> IOReturn,
+    >,
+    pub WritePipeAsyncTO: ::std::option::Option<
+        unsafe extern "C" fn(
+            self_: *mut ::std::os::raw::c_void,
+            pipeRef: UInt8,
+            buf: *mut ::std::os::raw::c_void,
+            size: UInt32,
+            noDataTimeout: UInt32,
+            completionTimeout: UInt32,
+            callback: IOAsyncCallback1,
+            refcon: *mut ::std::os::raw::c_void,
+        ) -> IOReturn,
+    >,
+    pub USBInterfaceGetStringIndex: ::std::option::Option<
+        unsafe extern "C" fn(self_: *mut ::std::os::raw::c_void, si: *mut UInt8) -> IOReturn,
+    >,
+    pub USBInterfaceOpenSeize:
+        ::std::option::Option<unsafe extern "C" fn(self_: *mut ::std::os::raw::c_void) -> IOReturn>,
+    pub ClearPipeStallBothEnds: ::std::option::Option<
+        unsafe extern "C" fn(self_: *mut ::std::os::raw::c_void, pipeRef: UInt8) -> IOReturn,
+    >,
+    pub SetPipePolicy: ::std::option::Option<
+        unsafe extern "C" fn(
+            self_: *mut ::std::os::raw::c_void,
+            pipeRef: UInt8,
+            maxPacketSize: UInt16,
+            maxInterval: UInt8,
+        ) -> IOReturn,
+    >,
+    pub GetBandwidthAvailable: ::std::option::Option<
+        unsafe extern "C" fn(
+            self_: *mut ::std::os::raw::c_void,
+            bandwidth: *mut UInt32,
+        ) -> IOReturn,
+    >,
+    pub GetEndpointProperties: ::std::option::Option<
+        unsafe extern "C" fn(
+            self_: *mut ::std::os::raw::c_void,
+            alternateSetting: UInt8,
+            endpointNumber: UInt8,
+            direction: UInt8,
+            transferType: *mut UInt8,
+            maxPacketSize: *mut UInt16,
+            interval: *mut UInt8,
+        ) -> IOReturn,
+    >,
+    pub LowLatencyReadIsochPipeAsync: ::std::option::Option<
+        unsafe extern "C" fn(
+            self_: *mut ::std::os::raw::c_void,
+            pipeRef: UInt8,
+            buf: *mut ::std::os::raw::c_void,
+            frameStart: UInt64,
+            numFrames: UInt32,
+            updateFrequency: UInt32,
+            frameList: *mut IOUSBLowLatencyIsocFrame,
+            callback: IOAsyncCallback1,
+            refcon: *mut ::std::os::raw::c_void,
+        ) -> IOReturn,
+    >,
+    pub LowLatencyWriteIsochPipeAsync: ::std::option::Option<
+        unsafe extern "C" fn(
+            self_: *mut ::std::os::raw::c_void,
+            pipeRef: UInt8,
+            buf: *mut ::std::os::raw::c_void,
+            frameStart: UInt64,
+            numFrames: UInt32,
+            updateFrequency: UInt32,
+            frameList: *mut IOUSBLowLatencyIsocFrame,
+            callback: IOAsyncCallback1,
+            refcon: *mut ::std::os::raw::c_void,
+        ) -> IOReturn,
+    >,
+    pub LowLatencyCreateBuffer: ::std::option::Option<
+        unsafe extern "C" fn(
+            self_: *mut ::std::os::raw::c_void,
+            buffer: *mut *mut ::std::os::raw::c_void,
+            size: IOByteCount,
+            bufferType: UInt32,
+        ) -> IOReturn,
+    >,
+    pub LowLatencyDestroyBuffer: ::std::option::Option<
+        unsafe extern "C" fn(
+            self_: *mut ::std::os::raw::c_void,
+            buffer: *mut ::std::os::raw::c_void,
+        ) -> IOReturn,
+    >,
+    pub GetBusMicroFrameNumber: ::std::option::Option<
+        unsafe extern "C" fn(
+            self_: *mut ::std::os::raw::c_void,
+            microFrame: *mut UInt64,
+            atTime: *mut AbsoluteTime,
+        ) -> IOReturn,
+    >,
+    pub GetFrameListTime: ::std::option::Option<
+        unsafe extern "C" fn(
+            self_: *mut ::std::os::raw::c_void,
+            microsecondsInFrame: *mut UInt32,
+        ) -> IOReturn,
+    >,
+    pub GetIOUSBLibVersion: ::std::option::Option<
+        unsafe extern "C" fn(
+            self_: *mut ::std::os::raw::c_void,
+            ioUSBLibVersion: *mut NumVersion,
+            usbFamilyVersion: *mut NumVersion,
+        ) -> IOReturn,
+    >,
+    pub FindNextAssociatedDescriptor: ::std::option::Option<
+        unsafe extern "C" fn(
+            self_: *mut ::std::os::raw::c_void,
+            currentDescriptor: *const ::std::os::raw::c_void,
+            descriptorType: UInt8,
+        ) -> *mut IOUSBDescriptorHeader,
+    >,
+    pub FindNextAltInterface: ::std::option::Option<
+        unsafe extern "C" fn(
+            self_: *mut ::std::os::raw::c_void,
+            current: *const ::std::os::raw::c_void,
+            request: *mut IOUSBFindInterfaceRequest,
+        ) -> *mut IOUSBDescriptorHeader,
+    >,
+    pub GetBusFrameNumberWithTime: ::std::option::Option<
+        unsafe extern "C" fn(
+            self_: *mut ::std::os::raw::c_void,
+            frame: *mut UInt64,
+            atTime: *mut AbsoluteTime,
+        ) -> IOReturn,
+    >,
+    pub GetPipePropertiesV2: ::std::option::Option<
+        unsafe extern "C" fn(
+            self_: *mut ::std::os::raw::c_void,
+            pipeRef: UInt8,
+            direction: *mut UInt8,
+            number: *mut UInt8,
+            transferType: *mut UInt8,
+            maxPacketSize: *mut UInt16,
+            interval: *mut UInt8,
+            maxBurst: *mut UInt8,
+            mult: *mut UInt8,
+            bytesPerInterval: *mut UInt16,
+        ) -> IOReturn,
+    >,
+}
