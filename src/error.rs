@@ -5,15 +5,47 @@ pub type UsbResult<T> = Result<T, Error>;
 
 #[derive(Debug, PartialEq)]
 pub enum Error {
+    /// An operation isn't supported; e.g. by this backend or device.
+    Unsupported,
+
     /// Error for when no devices are found that match a given selector.
     DeviceNotFound,
+
+    /// Error for when a device is not yet, or no longer, open.
+    DeviceNotOpen,
 
     /// Error representing a device that has no real USB representation;
     /// generated if we try to open e.g. a billboard device that the OS won't talk to.
     DeviceNotReal,
 
+    /// Error for when the device is reserved by someone who isn't us.
+    DeviceReserved,
+
+    /// Error for when a USB stall occurs unexpectedly.
+    Stalled,
+
+    /// A USB request has written to a non-existent endpoint.
+    InvalidEndpoint,
+
+    /// An operation exceeded the timeout interval.
+    TimedOut,
+
+    /// An argument was provided with an inalid/non-allowed value.
+    InvalidArgument,
+
+    /// A transfer was aborted.
+    Aborted,
+
+    /// The response wouldn't fit in the provided buffer.
+    Overrun,
+
+    /// The OS won't let us touch this resource.
+    PermissionDenied,
+
     /// An unspecified error, with associated OS error number.
     OsError(i64),
+
+    /// An OS error happened, but we can't get a description from it.
     UnspecifiedOsError,
 }
 
@@ -22,12 +54,22 @@ impl std::fmt::Display for Error {
         use Error::*;
 
         match self {
+            Unsupported => write!(f, "operation is not supported")?,
             DeviceNotFound => write!(f, "no device found")?,
+            DeviceNotOpen => write!(f, "tried to perform an operation on a non-open device")?,
             DeviceNotReal => write!(
                 f,
                 "tried to work with a device that isn't real to your OS (like a billboard class device)"
             )?,
-            OsError(errno) => write!(f, "operating system IO error {}", errno)?,
+            DeviceReserved => write!(f, "device reserved by someone else")?,
+            Stalled => write!(f, "unexpected transfer stall")?,
+            InvalidEndpoint => write!(f, "invalid endpoint")?,
+            TimedOut => write!(f, "timed out")?,
+            Overrun => write!(f, "buffer overrun")?,
+            InvalidArgument => write!(f, "invalid argument")?,
+            PermissionDenied => write!(f, "permission denied")?,
+            Aborted => write!(f, "aborted")?,
+            OsError(errno) => write!(f, "operating system IO error {errno}")?,
             UnspecifiedOsError => write!(
                 f,
                 "operating system IO error, but the OS doesn't specify which",

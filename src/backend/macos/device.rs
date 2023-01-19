@@ -36,7 +36,15 @@ pub(crate) struct MacOsDevice {
     pub(crate) device: OsDevice,
 }
 
-impl BackendDevice for MacOsDevice {}
+impl BackendDevice for MacOsDevice {
+    fn as_mut_any(&mut self) -> &mut dyn std::any::Any {
+        self
+    }
+
+    fn as_any(&self) -> &dyn std::any::Any {
+        self
+    }
+}
 
 /// Converts an IOIteratorNext result into a backend USB device.
 fn open_usb_device_from_io_device(device_service: IoService) -> UsbResult<Box<dyn BackendDevice>> {

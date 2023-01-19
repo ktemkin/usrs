@@ -8,3 +8,4 @@ pub mod backend;
 pub mod device;
 pub mod error;
 pub mod host;
+pub mod request;

@@ -1,9 +1,13 @@
 //! FFI types we're including here, as they're missing from io-kit-sys.
 //! You may not want to stare too closely at this; it's tweaked bindgen output.
+#![allow(
+    non_camel_case_types,
+    non_snake_case,
+    dead_code,
+    non_upper_case_globals
+)]
 
-#![allow(non_camel_case_types, non_snake_case, dead_code)]
-
-use std::ffi::c_void;
+use std::ffi::{c_int, c_void};
 
 use core_foundation_sys::{
     base::{kCFAllocatorSystemDefault, mach_port_t, SInt32},
@@ -18,6 +22,44 @@ use io_kit_sys::{
     IOAsyncCallback1,
 };
 
+//
+// Constants.
+const SYS_IOKIT: c_int = ((0x38) & 0x3f) << 26;
+const SUB_IOKIT_USB: c_int = ((1) & 0xfff) << 14;
+
+pub(crate) const kIOUSBUnknownPipeErr: c_int = SYS_IOKIT | SUB_IOKIT_USB | 0x61; // 0xe0004061  Pipe ref not recognized
+pub(crate) const kIOUSBTooManyPipesErr: c_int = SYS_IOKIT | SUB_IOKIT_USB | 0x60; // 0xe0004060  Too many pipes
+pub(crate) const kIOUSBNoAsyncPortErr: c_int = SYS_IOKIT | SUB_IOKIT_USB | 0x5f; // 0xe000405f  no async port
+pub(crate) const kIOUSBNotEnoughPipesErr: c_int = SYS_IOKIT | SUB_IOKIT_USB | 0x5e; // 0xe000405e  not enough pipes in interface
+pub(crate) const kIOUSBNotEnoughPowerErr: c_int = SYS_IOKIT | SUB_IOKIT_USB | 0x5d; // 0xe000405d  not enough power for selected configuration
+pub(crate) const kIOUSBEndpointNotFound: c_int = SYS_IOKIT | SUB_IOKIT_USB | 0x57; // 0xe0004057  Endpoint Not found
+pub(crate) const kIOUSBConfigNotFound: c_int = SYS_IOKIT | SUB_IOKIT_USB | 0x56; // 0xe0004056  Configuration Not found
+pub(crate) const kIOUSBPortWasSuspended: c_int = SYS_IOKIT | SUB_IOKIT_USB | 0x52; // 0xe0004052  The transaction was returned because the port was suspended
+pub(crate) const kIOUSBPipeStalled: c_int = SYS_IOKIT | SUB_IOKIT_USB | 0x4f; // 0xe000404f  Pipe has stalled, error needs to be cleared
+pub(crate) const kIOUSBInterfaceNotFound: c_int = SYS_IOKIT | SUB_IOKIT_USB | 0x4e; // 0xe000404e  Interface ref not recognized
+pub(crate) const kIOUSBLowLatencyBufferNotPreviouslyAllocated: c_int =
+    SYS_IOKIT | SUB_IOKIT_USB | 0x4d; // 0xe000404d  Attempted to use user land low latency isoc calls w/out calling PrepareBuffer (on the data buffer) first
+pub(crate) const kIOUSBLowLatencyFrameListNotPreviouslyAllocated: c_int =
+    SYS_IOKIT | SUB_IOKIT_USB | 0x4c; // 0xe000404c  Attempted to use user land low latency isoc calls w/out calling PrepareBuffer (on the frame list) first
+pub(crate) const kIOUSBHighSpeedSplitError: c_int = SYS_IOKIT | SUB_IOKIT_USB | 0x4b; // 0xe000404b  Error to hub on high speed bus trying to do split transaction
+pub(crate) const kIOUSBSyncRequestOnWLThread: c_int = SYS_IOKIT | SUB_IOKIT_USB | 0x4a; // 0xe000404a  A synchronous USB request was made on the workloop thread (from a callback?).  Only async requests are permitted in that case
+pub(crate) const kIOUSBDeviceNotHighSpeed: c_int = SYS_IOKIT | SUB_IOKIT_USB | 0x49; // 0xe0004049  Name is deprecated, see below
+pub(crate) const kIOUSBDeviceTransferredToCompanion: c_int = SYS_IOKIT | SUB_IOKIT_USB | 0x49; // 0xe0004049  The device has been tranferred to another controller for enumeration
+pub(crate) const kIOUSBClearPipeStallNotRecursive: c_int = SYS_IOKIT | SUB_IOKIT_USB | 0x48; // 0xe0004048  IOUSBPipe::ClearPipeStall should not be called recursively
+pub(crate) const kIOUSBDevicePortWasNotSuspended: c_int = SYS_IOKIT | SUB_IOKIT_USB | 0x47; // 0xe0004047  Port was not suspended
+pub(crate) const kIOUSBEndpointCountExceeded: c_int = SYS_IOKIT | SUB_IOKIT_USB | 0x46; // 0xe0004046  The endpoint was not created because the controller cannot support more endpoints
+pub(crate) const kIOUSBDeviceCountExceeded: c_int = SYS_IOKIT | SUB_IOKIT_USB | 0x45; // 0xe0004045  The device cannot be enumerated because the controller cannot support more devices
+pub(crate) const kIOUSBStreamsNotSupported: c_int = SYS_IOKIT | SUB_IOKIT_USB | 0x44; // 0xe0004044  The request cannot be completed because the XHCI controller does not support streams
+pub(crate) const kIOUSBInvalidSSEndpoint: c_int = SYS_IOKIT | SUB_IOKIT_USB | 0x43; // 0xe0004043  An endpoint found in a SuperSpeed device is invalid (usually because there is no Endpoint Companion Descriptor)
+pub(crate) const kIOUSBTooManyTransactionsPending: c_int = SYS_IOKIT | SUB_IOKIT_USB | 0x42; // 0xe0004042  The transaction cannot be submitted because it would exceed the allowed number of pending transactions
+pub(crate) const kIOUSBTransactionReturned: c_int = SYS_IOKIT | SUB_IOKIT_USB | 0x50;
+pub(crate) const kIOUSBTransactionTimeout: c_int = SYS_IOKIT | SUB_IOKIT_USB | 0x51;
+
+//
+
+//
+// Type aliases.
+//
 type REFIID = CFUUIDBytes;
 type LPVOID = *mut c_void;
 type HRESULT = SInt32;

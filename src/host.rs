@@ -1,5 +1,7 @@
 //! Abstraction over the OS/host's USB functionality.
 
+use std::rc::Rc;
+
 use crate::backend::{create_default_backend, Backend};
 use crate::device::{Device, DeviceInformation, DeviceSelector};
 use crate::error::{self, UsbResult};
@@ -8,14 +10,14 @@ use crate::error::{self, UsbResult};
 /// USB devices. This is typically an encapsulation of your OS connection.
 pub struct Host {
     /// The backend used to provide the functions for this Host.
-    backend: Box<dyn Backend>,
+    backend: Rc<dyn Backend>,
 }
 
 impl Host {
     /// Creates a new Host, using the backend appropriate for the current platform.
     pub fn new() -> UsbResult<Self> {
         let backend = create_default_backend()?;
-        Ok(Self::new_from_backend(backend)?)
+        Self::new_from_backend(backend)
     }
 
     /// Creates a new Host, from a custom backend; this allows the library to be
@@ -23,8 +25,8 @@ impl Host {
     /// your backend -- that'll make it our problem, rather than yours~.)
     ///
     /// Most of the time, you want [new].
-    pub fn new_from_backend(backend: Box<dyn Backend>) -> UsbResult<Self> {
-        return Ok(Host { backend });
+    pub fn new_from_backend(backend: Rc<dyn Backend>) -> UsbResult<Self> {
+        Ok(Host { backend })
     }
 
     /// Helper for [device] and [devices]; enumerates one or more devices matching a selector.
@@ -66,7 +68,7 @@ impl Host {
 
     /// Returns all devices currently connected to the system.
     pub fn all_devices(&mut self) -> UsbResult<Vec<DeviceInformation>> {
-        return self.devices(&Default::default());
+        self.devices(&Default::default())
     }
 
     /// Opens a device given its device information.
@@ -75,7 +77,10 @@ impl Host {
         let backend_device = self.backend.open(information)?;
 
         // FIXME: actually open the device, here, instead of having the backend do it?
-        Ok(Device::from_backend_device(backend_device))
+        Ok(Device::from_backend_device(
+            backend_device,
+            Rc::clone(&self.backend),
+        ))
     }
 }
 

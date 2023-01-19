@@ -8,13 +8,16 @@ use core_foundation_sys::{
     uuid::CFUUIDBytes,
 };
 use io_kit_sys::{
-    kIORegistryIterateParents, kIORegistryIterateRecursively, keys::kIOServicePlane,
+    kIORegistryIterateParents, kIORegistryIterateRecursively, keys::kIOServicePlane, ret::*,
     types::io_iterator_t, IOObjectRelease, IORegistryEntrySearchCFProperty, CFSTR,
 };
 use log::error;
 
-use super::iokit_c::{self, CFUUIDGetUUIDBytes, IOCFPlugInInterface};
-use crate::error::{Error, UsbResult};
+use super::iokit_c::{
+    self, kIOUSBNoAsyncPortErr, kIOUSBPipeStalled, kIOUSBTransactionTimeout, kIOUSBUnknownPipeErr,
+    CFUUIDGetUUIDBytes, IOCFPlugInInterface, IOUSBDevRequest, IOUSBDevRequestTO,
+};
+use crate::error::{self, Error, UsbResult};
 
 //
 // Support declarations.
@@ -43,18 +46,18 @@ pub(crate) struct IoObject {
 
 impl IoObject {
     pub(crate) fn new(object: u32) -> Self {
-        return IoObject { object };
+        IoObject { object }
     }
 
     /// Fetches the inner handle for passing to IOKit functions.
     pub(crate) fn get(&self) -> u32 {
-        return self.object;
+        self.object
     }
 
     /// Returns true iff the object has been created incorrectly.
     /// Use to maintain internal consistency.
     pub(crate) fn is_invalid(&self) -> bool {
-        return self.object == 0;
+        self.object == 0
     }
 }
 
@@ -74,12 +77,12 @@ pub(crate) struct PluginInterface {
 
 impl PluginInterface {
     pub(crate) fn new(interface: *mut *mut IOCFPlugInInterface) -> Self {
-        return Self { interface };
+        Self { interface }
     }
 
     /// Fetches the inner pointer for passing to IOKit functions.
     pub(crate) fn get(&self) -> *mut *mut IOCFPlugInInterface {
-        return self.interface;
+        self.interface
     }
 }
 
@@ -100,35 +103,112 @@ pub(crate) struct OsDevice {
     is_open: bool,
 }
 
+/// Helper for calling IOKit function pointers.
+macro_rules! call_unsafe_iokit_function {
+    ($ptr:expr, $function:ident) => {{
+        unsafe {
+            let func = (**$ptr).$function.expect("function pointer from IOKit was null");
+            func($ptr as *mut c_void)
+        }
+    }};
+    ($ptr:expr, $function:ident, $($args:expr),*) => {{
+        unsafe {
+            let func = (**$ptr).$function.expect("function pointer from IOKit was null");
+            func($ptr as *mut c_void, $($args),*)
+        }
+    }};
+}
+
 #[allow(dead_code)]
 impl OsDevice {
     pub(crate) fn new(device: *mut *mut UsbDevice) -> Self {
-        return Self {
+        Self {
             device,
             is_open: false,
-        };
+        }
     }
 
     /// Fetches the inner pointer for passing to IOKit functions.
     /// You probably should use one of the methods below, instead.
     pub(crate) fn get(&self) -> *mut *mut UsbDevice {
-        return self.device;
+        self.device
+    }
+
+    /// Helper that fetches the inner device in the form macOS APIs like it.
+    fn get_void_ptr(&self) -> *mut c_void {
+        self.device as *mut c_void
+    }
+
+    /// Opens the device, allowing the other functions on this type to be used.
+    fn open(&mut self) -> UsbResult<()> {
+        // If we're already open, we're done!
+        if self.is_open {
+            return Ok(());
+        }
+
+        // Otherwise, open the device.
+        UsbResult::from_io_return(call_unsafe_iokit_function!(self.device, USBDeviceOpen))
+    }
+
+    /// Applies a configuration to the device.
+    pub fn set_configuration(&mut self, index: u8) -> UsbResult<()> {
+        UsbResult::from_io_return(call_unsafe_iokit_function!(
+            self.device,
+            SetConfiguration,
+            index
+        ))
+    }
+
+    /// Attempts to perform a Bus Reset on the device.
+    pub fn reset(&mut self) -> UsbResult<()> {
+        UsbResult::from_io_return(call_unsafe_iokit_function!(self.device, ResetDevice))
+    }
+
+    /// Performs a control request on the device, without wrapping the unsafe behavior of
+    /// the contained IOUSbDevRequest. See also [[device_request_with_timeout]].
+    pub fn device_request(&self, request: &mut IOUSBDevRequest) -> UsbResult<()> {
+        UsbResult::from_io_return(call_unsafe_iokit_function!(
+            self.device,
+            DeviceRequest,
+            request
+        ))
+    }
+
+    /// Performs a control request on the device, without wrapping the unsafe behavior of
+    /// the contained IOUSbDevRequest. See also [[device_request]].
+    pub fn device_request_with_timeout(&self, request: &mut IOUSBDevRequestTO) -> UsbResult<()> {
+        UsbResult::from_io_return(call_unsafe_iokit_function!(
+            self.device,
+            DeviceRequestTO,
+            request
+        ))
+    }
+
+    /// Aborts any active transfer on EP0.
+    pub fn abort_ep0(&mut self) -> UsbResult<()> {
+        UsbResult::from_io_return(call_unsafe_iokit_function!(
+            self.device,
+            USBDeviceAbortPipeZero
+        ))
+    }
+
+    /// Places the device into power-save mode, or takes it out.
+    /// A value of true places the device into suspend.
+    pub fn suspend(&mut self, suspend: bool) -> UsbResult<()> {
+        UsbResult::from_io_return(call_unsafe_iokit_function!(
+            self.device,
+            USBDeviceSuspend,
+            suspend as u8
+        ))
     }
 
     /// Closes the active USB device.
     pub fn close(&mut self) {
-        // If we're already closed, we're done!
         if !self.is_open {
             return;
         }
 
-        // Otherwise, close ourselves.
-        unsafe {
-            let close = (**self.device).USBDeviceClose.unwrap();
-            close(self.device as *mut c_void);
-
-            self.is_open = false;
-        }
+        call_unsafe_iokit_function!(self.device, USBDeviceClose);
     }
 }
 
@@ -157,6 +237,61 @@ macro_rules! cfstr {
     }};
 }
 pub(crate) use cfstr;
+
+/// Translates an IOReturn error to its USRs equivalent.
+#[allow(non_upper_case_globals, non_snake_case)]
+fn io_return_to_error(rc: IOReturn) -> error::Error {
+    match rc {
+        // Substitute IOKit messages for our equivalent...
+        kIOReturnNotOpen => Error::DeviceNotOpen,
+        kIOReturnNoDevice => Error::DeviceNotFound,
+        kIOReturnExclusiveAccess => Error::DeviceReserved,
+        kIOReturnBadArgument => Error::InvalidArgument,
+        kIOReturnAborted => Error::Aborted,
+        kIOReturnOverrun => Error::Overrun,
+        kIOReturnNoResources => Error::PermissionDenied,
+        kIOUSBNoAsyncPortErr => Error::DeviceNotOpen,
+        kIOUSBUnknownPipeErr => Error::InvalidEndpoint,
+        kIOUSBPipeStalled => Error::Stalled,
+        kIOUSBTransactionTimeout => Error::TimedOut,
+        _ => Error::OsError(rc as i64),
+    }
+}
+
+// Extend UsbResult with IOKit conversions.
+pub(crate) trait IOKitEmptyResultExtension {
+    fn from_io_return(io_return: IOReturn) -> UsbResult<()>;
+}
+
+pub(crate) trait IOKitResultExtension<T> {
+    fn from_iokit_value(io_return: IOReturn, ok_value: T) -> UsbResult<T>;
+}
+
+impl IOKitEmptyResultExtension for UsbResult<()> {
+    /// Creates s UsbResult from an IOKit return code.
+    fn from_io_return(io_return: IOReturn) -> UsbResult<()> {
+        // If this wasn't a success, translate our error.
+        if io_return != kIOReturnSuccess {
+            Err(io_return_to_error(io_return))
+        } else {
+            Ok(())
+        }
+    }
+}
+
+impl<T> IOKitResultExtension<T> for UsbResult<T> {
+    /// Creates s UsbResult from an IOKit return code.
+    fn from_iokit_value(io_return: IOReturn, ok_value: T) -> UsbResult<T> {
+        // If this wasn't a success, translate our error.
+        if io_return != kIOReturnSuccess {
+            Err(io_return_to_error(io_return))
+        }
+        // Otherwise, package up our Ok value.
+        else {
+            Ok(ok_value)
+        }
+    }
+}
 
 /// Converts a CFNumberRef to a Rust integer.
 pub(crate) fn number_from_cf_number<T: TryFrom<u64>>(number_ref: CFNumberRef) -> UsbResult<T> {
@@ -243,6 +378,6 @@ pub(crate) fn get_iokit_string_device_property(
             return Ok(None);
         }
 
-        Ok(string_from_cf_string(raw_value)?)
+        string_from_cf_string(raw_value)
     }
 }
