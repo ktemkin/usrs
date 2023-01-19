@@ -121,7 +121,8 @@ impl Device {
     /// Attempts to release the current device from its kernel driver.
     /// Not supported on all platforms; unsupported platforms will return [Error::Unsupported].
     pub fn release_kernel_driver(&mut self, interface_number: u8) -> UsbResult<()> {
-        self.backend.release_kernel_driver(interface_number)
+        let backend = Rc::clone(&self.backend);
+        backend.release_kernel_driver(self, interface_number)
     }
 
     /// Attempts to release the current device from its kernel driver, if possible.
@@ -130,7 +131,9 @@ impl Device {
     /// operation; allowing this to be safely used for cases where you're more interested in
     /// failures that happen later, e.g. on first real device access.
     pub fn release_kernel_driver_if_possible(&mut self, interface_number: u8) -> UsbResult<()> {
-        match self.backend.release_kernel_driver(interface_number) {
+        let backend = Rc::clone(&self.backend);
+
+        match backend.release_kernel_driver(self, interface_number) {
             Err(Error::Unsupported) => Ok(()),
             other => other,
         }
@@ -138,7 +141,14 @@ impl Device {
 
     /// Attempts to take ownership of a given interface, claiming it for exclusive access.
     pub fn claim_interface(&mut self, interface_number: u8) -> UsbResult<()> {
-        self.backend.claim_interface(interface_number)
+        let backend = Rc::clone(&self.backend);
+        backend.claim_interface(self, interface_number)
+    }
+
+    /// Releases ownership of a given interface, allowing it to be claimed by others.
+    pub fn unclaim_interface(&mut self, interface_number: u8) -> UsbResult<()> {
+        let backend = Rc::clone(&self.backend);
+        backend.unclaim_interface(self, interface_number)
     }
 
     /// Performs an IN control request, with the following parameters:
@@ -321,6 +331,64 @@ impl Device {
         descriptor_index: u8,
     ) -> UsbResult<Vec<u8>> {
         self.read_descriptor(descriptor_type.into(), descriptor_index)
+    }
+
+    /// Performs a read from the provided endpoint.
+    /// Usable for bulk and interrupt reads.
+    ///
+    /// - [endpoint]: The endpoint number (or address) to read from.
+    /// - [max_length]: The maximum length we'll try to read. The actual amount read can be anywhere
+    ///   from 0 to this length.
+    /// - [timeout]: If provided, the maximum amount of time that will be spent performing this
+    ///   read. If not provided, this read will be allowed to continue indefinitely until data
+    ///   arrives or an error arises.
+    ///
+    /// Returns the actual amount of data read.
+    pub fn read(
+        &mut self,
+        endpoint: u8,
+        buffer: &mut [u8],
+        timeout: Option<Duration>,
+    ) -> UsbResult<usize> {
+        self.backend.read(self, endpoint, buffer, timeout)
+    }
+
+    /// Performs a read from the provided endpoint.
+    /// Usable for bulk and interrupt reads.
+    ///
+    /// This convenience variant generates a vector, for ease of use, but may be slower than
+    /// e.g. re-using an appropriately sized buffer for multiple reads.
+    ///
+    /// - [endpoint]: The endpoint number (or address) to read from.
+    /// - [max_length]: The maximum length we'll try to read. The actual amount read can be anywhere
+    ///   from 0 to this length.
+    /// - [timeout]: If provided, the maximum amount of time that will be spent performing this
+    ///   read. If not provided, this read will be allowed to continue indefinitely until data
+    ///   arrives or an error arises.
+    ///
+    /// Returns the actual amount of data read.
+    pub fn read_to_vec(
+        &mut self,
+        endpoint: u8,
+        max_length: usize,
+        timeout: Option<Duration>,
+    ) -> UsbResult<Vec<u8>> {
+        let mut buffer = vec![0; max_length as usize];
+
+        // Perform our core read...
+        let actual_size = self.read(endpoint, &mut buffer, timeout)?;
+
+        // ... clamp it down to the actual length...
+        buffer.truncate(actual_size);
+
+        // ... and return it.
+        Ok(buffer)
+    }
+
+    /// Performs a write to the provided endpoint.
+    /// Usable for bulk and interrupt writes.
+    pub fn write(&mut self, endpoint: u8, data: &[u8], timeout: Option<Duration>) -> UsbResult<()> {
+        self.backend.write(self, endpoint, data, timeout)
     }
 
     /// Gains access to the device's per-backend data.

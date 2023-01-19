@@ -18,6 +18,9 @@ pub trait BackendDevice: std::fmt::Debug {
 }
 
 /// Trait that unifies all of our OS-specific backends.
+///
+/// See [Device] for more detailed documentation for many of these methods,
+/// as their signatures are very close to the same.
 pub trait Backend: std::fmt::Debug {
     /// Returns a collection of device information for all devices present on the system.
     fn get_devices(&self) -> UsbResult<Vec<DeviceInformation>>;
@@ -26,10 +29,13 @@ pub trait Backend: std::fmt::Debug {
     fn open(&self, information: &DeviceInformation) -> UsbResult<Box<dyn BackendDevice>>;
 
     /// Releases the kernel driver associated with the given device, if possible.
-    fn release_kernel_driver(&self, interface: u8) -> UsbResult<()>;
+    fn release_kernel_driver(&self, device: &mut Device, interface: u8) -> UsbResult<()>;
 
     /// Attempts to claim an interface on the given device.
-    fn claim_interface(&self, interface: u8) -> UsbResult<()>;
+    fn claim_interface(&self, device: &mut Device, interface: u8) -> UsbResult<()>;
+
+    /// Attempts to release the claim held over a given interface.
+    fn unclaim_interface(&self, device: &mut Device, interface: u8) -> UsbResult<()>;
 
     /// Performs an IN control request.
     /// Returns the amount actually read.
@@ -44,7 +50,7 @@ pub trait Backend: std::fmt::Debug {
         timeout: Option<Duration>,
     ) -> UsbResult<usize>;
 
-    // Performs an OUT control request.
+    /// Performs an OUT control request.
     fn control_write(
         &self,
         device: &Device,
@@ -56,9 +62,29 @@ pub trait Backend: std::fmt::Debug {
         timeout: Option<Duration>,
     ) -> UsbResult<()>;
 
+    /// Reads from an endpoint, for e.g. bulk reads.
+    fn read(
+        &self,
+        device: &Device,
+        endpoint: u8,
+        buffer: &mut [u8],
+        timeout: Option<Duration>,
+    ) -> UsbResult<usize>;
+
+    /// Writes to an endpoint, for e.g. bulk writes.
+    fn write(
+        &self,
+        device: &Device,
+        endpoint: u8,
+        data: &[u8],
+        timeout: Option<Duration>,
+    ) -> UsbResult<()>;
+
     // TODO:
-    // - Non-control read.
-    // - Non-control write.
+    // - Async control requests.
+    // - Async bulk requests.
+    // - Lots of metadata gets.
+    // - Isochronous???
 }
 
 /// Creates a default backend implementation for MacOS machines.

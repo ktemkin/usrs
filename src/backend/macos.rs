@@ -2,11 +2,10 @@
 
 use std::{ffi::c_void, time::Duration};
 
-use log::warn;
-
 use self::{
     device::{open_usb_device, MacOsDevice},
-    iokit::OsDevice,
+    endpoint::{address_for_in_endpoint, address_for_out_endpoint},
+    iokit::{to_iokit_timeout, OsDevice, OsInterface},
     iokit_c::IOUSBDevRequest,
 };
 
@@ -39,6 +38,15 @@ impl MacOsBackend {
     }
 
     /// Helper that fetches the MacOsBackend for the relevant device.
+    unsafe fn device_backend_mut<'a>(&self, device: &'a mut Device) -> &'a mut MacOsDevice {
+        device
+            .backend_data_mut()
+            .as_mut_any()
+            .downcast_mut()
+            .expect("internal consistency: tried to open a type from another backend?")
+    }
+
+    /// Helper that fetches the MacOsBackend for the relevant device.
     unsafe fn os_device_for<'a>(&self, device: &'a Device) -> &'a OsDevice {
         &self.device_backend(device).device
     }
@@ -60,17 +68,7 @@ impl MacOsBackend {
 
         // If we have a timeout, use the *TO request function.
         if let Some(timeout) = timeout {
-            let mut timeout_ms = timeout.as_millis() as u32;
-
-            // Truncate this to a u32, since more would be a heckuva long time anyway.
-            if timeout.as_millis() > (u32::MAX as u128) {
-                warn!(
-                    "A wildly long timeout ({}s) was truncated to u32::MAX ({}s).",
-                    timeout.as_secs_f64(),
-                    Duration::from_millis(u32::MAX as u64).as_secs_f64()
-                );
-                timeout_ms = u32::MAX;
-            }
+            let timeout_ms = to_iokit_timeout(timeout);
 
             // Populate the request-with-TimeOut structure, which will be passed to macOS.
             let mut request_struct = IOUSBDevRequestTO {
@@ -105,6 +103,48 @@ impl MacOsBackend {
             Ok(request_struct.wLenDone as usize)
         }
     }
+
+    // Helper that converts an endpoint address into a interface + pipeRef.
+    unsafe fn resources_for_endpoint<'a>(
+        &self,
+        device: &'a Device,
+        address: u8,
+    ) -> UsbResult<(u8, &'a OsInterface)> {
+        // Unpack the raw OS device from inside of our USRs device.
+        let backend_device = self.device_backend(device);
+
+        // Find the endpoint metadata for the relevant endpoint...
+        let endpoint_info = backend_device
+            .endpoint_metadata
+            .get(&address)
+            .ok_or(Error::InvalidEndpoint)?;
+
+        // ... and get the associated interface.
+        let interface = backend_device
+            .interfaces
+            .get(&endpoint_info.interface_number)
+            .expect("endpoint points to an invalid interface");
+
+        Ok((endpoint_info.pipe_ref, interface))
+    }
+
+    // Helper that converts an IN endpoint number into a interface + pipeRef.
+    unsafe fn resources_for_in_endpoint<'a>(
+        &self,
+        device: &'a Device,
+        number: u8,
+    ) -> UsbResult<(u8, &'a OsInterface)> {
+        self.resources_for_endpoint(device, address_for_in_endpoint(number))
+    }
+
+    // Helper that converts an OUT endpoint number into a interface + pipeRef.
+    unsafe fn resources_for_out_endpoint<'a>(
+        &self,
+        device: &'a Device,
+        number: u8,
+    ) -> UsbResult<(u8, &'a OsInterface)> {
+        self.resources_for_endpoint(device, address_for_out_endpoint(number))
+    }
 }
 
 impl Backend for MacOsBackend {
@@ -116,16 +156,45 @@ impl Backend for MacOsBackend {
         open_usb_device(information)
     }
 
-    fn release_kernel_driver(&self, _interface: u8) -> UsbResult<()> {
-        // We don't currently have a way of making macOS release interfaces.
+    fn release_kernel_driver(&self, _device: &mut Device, _interface: u8) -> UsbResult<()> {
+        // We don't currently have a way of making macOS release kernel drivers.
+        //
+        // Theoretically, if the target binary is signed with the `com.apple.vm.device-access`
+        // entitlement, we'd be able to do this; but this isn't something we yet support.
         Err(Error::Unsupported)
     }
 
-    fn claim_interface(&self, _interface: u8) -> UsbResult<()> {
-        // This is handled automatically by macOS; claiming interfaces is done when they're opened.
-        // In the future we may way to handle this more explicitly; but for now this will mostly
-        // not be exposed to the user, anyway.
-        Ok(())
+    fn claim_interface(&self, device: &mut Device, interface: u8) -> UsbResult<()> {
+        unsafe {
+            // Unpack the raw OS device from inside of our USRs device.
+            let backend_device = self.device_backend_mut(device);
+
+            // If we don't have a handle on that interface, error out.
+            let interface = backend_device
+                .interfaces
+                .get_mut(&interface)
+                .ok_or(Error::InvalidArgument)?;
+
+            // Otherwise, open the relevant interface, claiming it.
+            interface.open()
+        }
+    }
+
+    fn unclaim_interface(&self, device: &mut Device, interface: u8) -> UsbResult<()> {
+        unsafe {
+            // Unpack the raw OS device from inside of our USRs device.
+            let backend_device = self.device_backend_mut(device);
+
+            // If we don't have a handle on that interface, error out.
+            let interface = backend_device
+                .interfaces
+                .get_mut(&interface)
+                .ok_or(Error::InvalidArgument)?;
+
+            // Otherwise, close the relevant interface, releasing our claim.
+            interface.close();
+            Ok(())
+        }
     }
 
     fn control_read(
@@ -182,6 +251,42 @@ impl Backend for MacOsBackend {
                 timeout,
             )?;
             Ok(())
+        }
+    }
+
+    fn read(
+        &self,
+        device: &Device,
+        endpoint: u8,
+        buffer: &mut [u8],
+        timeout: Option<Duration>,
+    ) -> UsbResult<usize> {
+        unsafe {
+            let (pipe_ref, interface) = self.resources_for_in_endpoint(device, endpoint)?;
+
+            if let Some(timeout) = timeout {
+                interface.read_with_timeout(pipe_ref, buffer, to_iokit_timeout(timeout))
+            } else {
+                interface.read(pipe_ref, buffer)
+            }
+        }
+    }
+
+    fn write(
+        &self,
+        device: &Device,
+        endpoint: u8,
+        data: &[u8],
+        timeout: Option<Duration>,
+    ) -> UsbResult<()> {
+        unsafe {
+            let (pipe_ref, interface) = self.resources_for_out_endpoint(device, endpoint)?;
+
+            if let Some(timeout) = timeout {
+                interface.write_with_timeout(pipe_ref, data, to_iokit_timeout(timeout))
+            } else {
+                interface.write(pipe_ref, data)
+            }
         }
     }
 }

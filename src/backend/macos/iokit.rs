@@ -1,6 +1,9 @@
 //! Helpers for working with IOKit.
 
-use std::ffi::{c_void, CStr, CString};
+use std::{
+    ffi::{c_void, CStr, CString},
+    time::Duration,
+};
 
 use core_foundation_sys::{
     number::{kCFNumberSInt64Type, CFNumberGetValue, CFNumberRef},
@@ -11,12 +14,12 @@ use io_kit_sys::{
     kIORegistryIterateParents, kIORegistryIterateRecursively, keys::kIOServicePlane, ret::*,
     types::io_iterator_t, IOObjectRelease, IORegistryEntrySearchCFProperty, CFSTR,
 };
-use log::error;
+use log::{error, warn};
 
 use super::iokit_c::{
     self, kIOUSBFindInterfaceDontCare, kIOUSBNoAsyncPortErr, kIOUSBPipeStalled,
     kIOUSBTransactionTimeout, kIOUSBUnknownPipeErr, CFUUIDGetUUIDBytes, IOCFPlugInInterface,
-    IOUSBDevRequest, IOUSBDevRequestTO, IOUSBFindInterfaceRequest, UInt16, UInt8,
+    IOUSBDevRequest, IOUSBDevRequestTO, IOUSBFindInterfaceRequest, UInt16, UInt32, UInt8,
 };
 use crate::error::{self, Error, UsbResult};
 
@@ -390,6 +393,67 @@ impl OsInterface {
         })
     }
 
+    /// Performs a write.
+    pub fn write(&self, pipe_ref: u8, data: &[u8]) -> UsbResult<()> {
+        UsbResult::from_io_return(call_unsafe_iokit_function!(
+            self.interface,
+            WritePipe,
+            pipe_ref,
+            data.as_ptr() as *mut c_void,
+            data.len() as u32
+        ))
+    }
+
+    /// Performs a write, with an associated timeout.
+    pub fn write_with_timeout(&self, pipe_ref: u8, data: &[u8], timeout: u32) -> UsbResult<()> {
+        UsbResult::from_io_return(call_unsafe_iokit_function!(
+            self.interface,
+            WritePipeTO,
+            pipe_ref,
+            data.as_ptr() as *mut c_void,
+            data.len() as u32,
+            timeout,
+            timeout
+        ))
+    }
+
+    /// Performs a read.
+    pub fn read(&self, pipe_ref: u8, buffer: &mut [u8]) -> UsbResult<usize> {
+        let mut size: UInt32 = buffer.len() as u32;
+
+        UsbResult::from_io_return(call_unsafe_iokit_function!(
+            self.interface,
+            ReadPipe,
+            pipe_ref,
+            buffer.as_mut_ptr() as *mut c_void,
+            &mut size
+        ))?;
+
+        Ok(size as usize)
+    }
+
+    /// Performs a write, with an associated timeout.
+    pub fn read_with_timeout(
+        &self,
+        pipe_ref: u8,
+        buffer: &mut [u8],
+        timeout: u32,
+    ) -> UsbResult<usize> {
+        let mut size: UInt32 = buffer.len() as u32;
+
+        UsbResult::from_io_return(call_unsafe_iokit_function!(
+            self.interface,
+            ReadPipeTO,
+            pipe_ref,
+            buffer.as_mut_ptr() as *mut c_void,
+            &mut size,
+            timeout,
+            timeout
+        ))?;
+
+        Ok(size as usize)
+    }
+
     /// Closes the active USB interface.
     pub fn close(&mut self) {
         if !self.is_open {
@@ -571,4 +635,21 @@ pub(crate) fn get_iokit_string_device_property(
 
         string_from_cf_string(raw_value)
     }
+}
+
+// Helper function that converts timeouts into the IOKit representation.
+pub(crate) fn to_iokit_timeout(timeout: Duration) -> u32 {
+    let mut timeout_ms = timeout.as_millis() as u32;
+
+    // Truncate this to a u32, since more would be a heckuva long time anyway.
+    if timeout.as_millis() > (u32::MAX as u128) {
+        warn!(
+            "A wildly long timeout ({}s) was truncated to u32::MAX ({}s).",
+            timeout.as_secs_f64(),
+            Duration::from_millis(u32::MAX as u64).as_secs_f64()
+        );
+        timeout_ms = u32::MAX;
+    }
+
+    timeout_ms
 }
