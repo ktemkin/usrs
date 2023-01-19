@@ -18,8 +18,9 @@ use log::{error, warn};
 
 use super::iokit_c::{
     self, kIOUSBFindInterfaceDontCare, kIOUSBNoAsyncPortErr, kIOUSBPipeStalled,
-    kIOUSBTransactionTimeout, kIOUSBUnknownPipeErr, CFUUIDGetUUIDBytes, IOCFPlugInInterface,
-    IOUSBDevRequest, IOUSBDevRequestTO, IOUSBFindInterfaceRequest, UInt16, UInt32, UInt8,
+    kIOUSBTransactionTimeout, kIOUSBUnknownPipeErr, AbsoluteTime, CFUUIDGetUUIDBytes,
+    IOCFPlugInInterface, IOUSBDevRequest, IOUSBDevRequestTO, IOUSBFindInterfaceRequest, UInt16,
+    UInt32, UInt64, UInt8,
 };
 use crate::error::{self, Error, UsbResult};
 
@@ -160,7 +161,20 @@ impl OsDevice {
     }
 
     /// Applies a configuration to the device.
-    pub fn set_configuration(&mut self, index: u8) -> UsbResult<()> {
+    pub fn get_configuration(&self) -> UsbResult<u8> {
+        let mut configuration: UInt8 = 0;
+
+        UsbResult::from_io_return(call_unsafe_iokit_function!(
+            self.device,
+            GetConfiguration,
+            &mut configuration
+        ))?;
+
+        Ok(configuration)
+    }
+
+    /// Applies a configuration to the device.
+    pub fn set_configuration(&self, index: u8) -> UsbResult<()> {
         UsbResult::from_io_return(call_unsafe_iokit_function!(
             self.device,
             SetConfiguration,
@@ -168,8 +182,25 @@ impl OsDevice {
         ))
     }
 
+    /// Attempts to retrieve the current bus-frame number, and a time relative to Jan 1 2001 (00:00 GMT).
+    /// Returns (frame, timestamp).
+    pub fn get_frame_number(&self) -> UsbResult<(u64, u64)> {
+        let mut frame: UInt64 = 0;
+        let mut time: AbsoluteTime = AbsoluteTime { lo: 0, hi: 0 };
+
+        UsbResult::from_io_return(call_unsafe_iokit_function!(
+            self.device,
+            GetBusFrameNumber,
+            &mut frame,
+            &mut time
+        ))?;
+
+        let timestamp = (time.hi as u64) << 32 | (time.lo as u64);
+        Ok((frame, timestamp))
+    }
+
     /// Attempts to perform a Bus Reset on the device.
-    pub fn reset(&mut self) -> UsbResult<()> {
+    pub fn reset(&self) -> UsbResult<()> {
         UsbResult::from_io_return(call_unsafe_iokit_function!(self.device, ResetDevice))
     }
 
@@ -452,6 +483,31 @@ impl OsInterface {
         ))?;
 
         Ok(size as usize)
+    }
+
+    /// Clears the stall condition on the provided PipeRef.
+    pub fn clear_stall(&self, pipe_ref: u8) -> UsbResult<()> {
+        if self.deny_all {
+            return Err(Error::PermissionDenied);
+        }
+
+        UsbResult::from_io_return(call_unsafe_iokit_function!(
+            self.interface,
+            ClearPipeStall,
+            pipe_ref
+        ))
+    }
+
+    /// Clears the stall condition on the provided PipeRef.
+    pub fn set_alternate_setting(&self, setting: u8) -> UsbResult<()> {
+        if self.deny_all {
+            return Err(Error::PermissionDenied);
+        }
+        UsbResult::from_io_return(call_unsafe_iokit_function!(
+            self.interface,
+            SetAlternateInterface,
+            setting
+        ))
     }
 
     /// Closes the active USB interface.

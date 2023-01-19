@@ -1,6 +1,9 @@
 //! Core, low-level functionality for macOS.
 
-use std::{ffi::c_void, time::Duration};
+use std::{
+    ffi::c_void,
+    time::{Duration, SystemTime},
+};
 
 use self::{
     device::{open_usb_device, MacOsDevice},
@@ -195,6 +198,55 @@ impl Backend for MacOsBackend {
             interface.close();
             Ok(())
         }
+    }
+
+    fn active_configuration(&self, device: &Device) -> UsbResult<u8> {
+        unsafe {
+            let backend_device = self.os_device_for(device);
+            backend_device.get_configuration()
+        }
+    }
+
+    fn set_active_configuration(&self, device: &Device, configuration_index: u8) -> UsbResult<()> {
+        unsafe {
+            let backend_device = self.os_device_for(device);
+            backend_device.set_configuration(configuration_index)
+        }
+    }
+
+    fn reset_device(&self, device: &Device) -> UsbResult<()> {
+        unsafe {
+            let backend_device = self.os_device_for(device);
+            backend_device.reset()
+        }
+    }
+
+    fn clear_stall(&self, device: &Device, endpoint_address: u8) -> UsbResult<()> {
+        unsafe {
+            let (pipe_ref, interface) = self.resources_for_endpoint(device, endpoint_address)?;
+            interface.clear_stall(pipe_ref)
+        }
+    }
+
+    fn set_alternate_setting(&self, device: &Device, interface: u8, setting: u8) -> UsbResult<()> {
+        unsafe {
+            let backend_data = self.device_backend(device);
+            let interface = backend_data
+                .interfaces
+                .get(&interface)
+                .ok_or(Error::InvalidInterface)?;
+
+            interface.set_alternate_setting(setting)
+        }
+    }
+
+    fn current_bus_frame(&self, _device: &Device) -> UsbResult<(u64, SystemTime)> {
+        // In theory, this should be easy. We call get_frame_number, which gives us
+        // the u64 frame number and the AbsoluteTime. In practice, I currently have no
+        // idea _which_ macOS absolute time that its, and I'm worried it's a mach absolute time,
+        // which is in terms of _number of scheduler ticks_. Once we figure out how to convert
+        // an IOKit AbsoluteTime to a meaningful time, we can do the math here to return this.
+        Err(Error::Unsupported)
     }
 
     fn control_read(

@@ -3,7 +3,7 @@
 
 use std::any::Any;
 use std::rc::Rc;
-use std::time::Duration;
+use std::time::{Duration, SystemTime};
 
 use crate::device::{Device, DeviceInformation};
 use crate::error::UsbResult;
@@ -36,6 +36,25 @@ pub trait Backend: std::fmt::Debug {
 
     /// Attempts to release the claim held over a given interface.
     fn unclaim_interface(&self, device: &mut Device, interface: u8) -> UsbResult<()>;
+
+    /// Returns the index of the active configuration, or 0 if the device is unconfigured.
+    fn active_configuration(&self, device: &Device) -> UsbResult<u8>;
+
+    /// Attempts to select the active configuration for the device.
+    fn set_active_configuration(&self, device: &Device, configuration_index: u8) -> UsbResult<()>;
+
+    /// Attempts to bus reset the given device.
+    fn reset_device(&self, device: &Device) -> UsbResult<()>;
+
+    /// Attempts to clear the halt condition on a given endpoint address.
+    fn clear_stall(&self, device: &Device, endpoint_address: u8) -> UsbResult<()>;
+
+    /// Configures an interface into an alternate setting.
+    fn set_alternate_setting(&self, device: &Device, interface: u8, setting: u8) -> UsbResult<()>;
+
+    /// Returns the current USB frame number, and time at which it occurred.
+    /// Precision will vary between backends.
+    fn current_bus_frame(&self, device: &Device) -> UsbResult<(u64, SystemTime)>;
 
     /// Performs an IN control request.
     /// Returns the amount actually read.
@@ -83,7 +102,6 @@ pub trait Backend: std::fmt::Debug {
     // TODO:
     // - Async control requests.
     // - Async bulk requests.
-    // - Lots of metadata gets.
     // - Isochronous???
 }
 

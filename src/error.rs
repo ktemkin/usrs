@@ -24,8 +24,11 @@ pub enum Error {
     /// Error for when a USB stall occurs unexpectedly.
     Stalled,
 
-    /// A USB request has written to a non-existent endpoint.
+    /// Targeting a non-existent endpoint.
     InvalidEndpoint,
+
+    /// Targeting a non-existent interface.
+    InvalidInterface,
 
     /// An operation exceeded the timeout interval.
     TimedOut,
@@ -64,6 +67,7 @@ impl std::fmt::Display for Error {
             DeviceReserved => write!(f, "device reserved by someone else")?,
             Stalled => write!(f, "unexpected transfer stall")?,
             InvalidEndpoint => write!(f, "invalid endpoint")?,
+            InvalidInterface => write!(f, "invalid interface")?,
             TimedOut => write!(f, "timed out")?,
             Overrun => write!(f, "buffer overrun")?,
             InvalidArgument => write!(f, "invalid argument")?,
