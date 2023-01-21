@@ -5,8 +5,11 @@ use std::{cell::RefCell, rc::Rc, sync::Arc, time::Duration};
 use crate::{
     backend::{Backend, BackendDevice},
     request::{DescriptorType, RequestType, StandardDeviceRequest, STANDARD_IN_FROM_DEVICE},
-    Error, UsbResult,
+    Error, ReadBuffer, UsbResult,
 };
+
+#[cfg(feature = "async")]
+use crate::futures::UsbFuture;
 
 /// Contains known information for an unopened device.
 #[allow(dead_code)]
@@ -215,6 +218,50 @@ impl Device {
         )
     }
 
+    /// Performs an asynchronous IN control request, with the following parameters:
+    /// - [request_type] specifies the USB control request type. It's recommended this is
+    /// - [request_number] is the request number. See e.g. USB 2.0 Chapter 9.
+    /// - [value] and [index] are arguments to the request. For requests with a recipient
+    ///   other than the device, [index] is usually the index of the target. See USB 2.0 Chapter 9.
+    /// - [target] is the data to be transmitted as part of the request. It must be between [0, 65535]B.
+    /// - [timeout] is how long we should wait for the request. If not provided, we'll wait
+    ///   indefinitely.
+    ///
+    /// Like a typical async function, this method returns a future. However, since _submission_
+    /// can fail before the asynchronous component, the future is wrapped in a UsbResult.
+    #[cfg(feature = "async")]
+    pub fn control_read_async(
+        &mut self,
+        request_type: RequestType,
+        request_number: u8,
+        value: u16,
+        index: u16,
+        target: Arc<RefCell<dyn AsMut<[u8]>>>,
+        timeout: Option<Duration>,
+    ) -> UsbResult<UsbFuture> {
+        // Create the future, and get a copy of it for our inner callback API,
+        // because everyone needs to get themselves a copy.
+        let future = UsbFuture::new();
+        let shared_state = future.clone_state();
+
+        // Convert our inner callback-API into an async API by having our callback just... complete the future.
+        let callback = Box::new(move |result| shared_state.lock().unwrap().complete(result));
+
+        // Finally, trigger the actual async control read.
+        self.backend.control_read_nonblocking(
+            self,
+            request_type.into(),
+            request_number,
+            value,
+            index,
+            target,
+            callback,
+            timeout,
+        )?;
+
+        Ok(future)
+    }
+
     /// Performs an IN control request, with the parameters below.
     /// This convenience variant generates a vector, for ease of use, but may be slower than
     /// e.g. re-using an appropriately sized buffer for multiple requests.
@@ -360,13 +407,34 @@ impl Device {
     ///
     /// (Technically, this can get string descriptors, too, but it'll use the Not Strictly Correct
     ///  default language ID, langID '0').
-    ///
     pub fn read_standard_descriptor(
         &mut self,
         descriptor_type: DescriptorType,
         descriptor_index: u8,
     ) -> UsbResult<Vec<u8>> {
         self.read_descriptor(descriptor_type.into(), descriptor_index)
+    }
+
+    #[cfg(feature = "async")]
+    ///
+    /// (Technically, this can get string descriptors, too, but it'll use the Not Strictly Correct
+    ///  default language ID, langID '0').
+    pub fn read_standard_descriptor_async(
+        &mut self,
+        descriptor_type: DescriptorType,
+        descriptor_index: u8,
+        buffer: ReadBuffer,
+    ) -> UsbResult<UsbFuture> {
+        let value = ((descriptor_type as u16) << 8) | (descriptor_index as u16);
+
+        self.control_read_async(
+            STANDARD_IN_FROM_DEVICE,
+            StandardDeviceRequest::GetDescriptor.into(),
+            value,
+            0,
+            buffer,
+            None,
+        )
     }
 
     /// Performs a read from the provided endpoint.

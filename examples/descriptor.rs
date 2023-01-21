@@ -1,6 +1,8 @@
 //! Example that reads USB descriptors from a specified device.
 
-use usrs::request::{DescriptorType, STANDARD_IN_FROM_DEVICE};
+use std::sync::Arc;
+
+use usrs::request::DescriptorType;
 use usrs::{device, open, DeviceSelector};
 
 fn main() -> Result<(), Box<dyn std::error::Error>> {
@@ -15,11 +17,34 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     // ... open it ...
     let mut t5_headset = open(&t5_headset_info)?;
+    println!("\nOpened a device:");
     dbg!(&t5_headset);
 
-    // ... and ask for its device descriptor.
+    //
+    // Read the device descriptor synchronously.
+    //
+
     let descriptor = t5_headset.read_standard_descriptor(DescriptorType::Device, 0)?;
+    println!("\n\nIts device descriptor, read synchronously:");
     dbg!(descriptor);
+
+    //
+    // Read the device descriptor asynchronously.
+    //
+
+    let buffer = usrs::create_read_buffer(1024);
+    let size_read = smol::block_on(t5_headset.read_standard_descriptor_async(
+        DescriptorType::Device,
+        0,
+        Arc::clone(&buffer),
+    )?)?;
+
+    // Extract our buffer from its async encapsulation...
+    let mut buffer = buffer.borrow_mut();
+
+    // ... and print it.
+    println!("\n\nIts device descriptor, read asynchronously:");
+    dbg!(&buffer.as_mut()[0..size_read]);
 
     Ok(())
 }

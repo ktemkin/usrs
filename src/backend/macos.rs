@@ -1,8 +1,7 @@
 //! Core, low-level functionality for macOS.
 
 use std::{
-    borrow::{Borrow, BorrowMut},
-    cell::{Cell, RefCell},
+    cell::RefCell,
     ffi::c_void,
     sync::Arc,
     time::{Duration, SystemTime},
@@ -486,8 +485,33 @@ impl Backend for MacOsBackend {
         buffer: Arc<RefCell<dyn AsMut<[u8]>>>,
         callback: Box<dyn FnOnce(UsbResult<usize>)>,
         timeout: Option<Duration>,
-    ) -> UsbResult<usize> {
-        todo!()
+    ) -> UsbResult<()> {
+        unsafe {
+            let (pipe_ref, interface) = self.resources_for_in_endpoint(device, endpoint)?;
+
+            // Extract the data we were passed from the user, so we can pass it to IOKit.
+            let mut data_dyn = (*buffer).borrow_mut();
+            let data = data_dyn.as_mut();
+
+            if let Some(timeout) = timeout {
+                interface.read_with_timeout_nonblocking(
+                    pipe_ref,
+                    data.as_mut_ptr() as *mut c_void,
+                    data.len() as u32,
+                    delegate_iousb_callback,
+                    leak_to_iokit(callback),
+                    to_iokit_timeout(timeout),
+                )
+            } else {
+                interface.read_nonblocking(
+                    pipe_ref,
+                    data.as_mut_ptr() as *mut c_void,
+                    data.len() as u32,
+                    delegate_iousb_callback,
+                    leak_to_iokit(callback),
+                )
+            }
+        }
     }
 
     fn write_nonblocking(
@@ -498,6 +522,30 @@ impl Backend for MacOsBackend {
         callback: Box<dyn FnOnce(UsbResult<usize>)>,
         timeout: Option<Duration>,
     ) -> UsbResult<()> {
-        todo!()
+        unsafe {
+            let (pipe_ref, interface) = self.resources_for_out_endpoint(device, endpoint)?;
+
+            // Extract the data we were passed from the user, so we can pass it to IOKit.
+            let data = (*data).as_ref();
+
+            if let Some(timeout) = timeout {
+                interface.write_with_timeout_nonblocking(
+                    pipe_ref,
+                    data.as_ptr() as *mut c_void,
+                    data.len() as u32,
+                    delegate_iousb_callback,
+                    leak_to_iokit(callback),
+                    to_iokit_timeout(timeout),
+                )
+            } else {
+                interface.write_nonblocking(
+                    pipe_ref,
+                    data.as_ptr() as *mut c_void,
+                    data.len() as u32,
+                    delegate_iousb_callback,
+                    leak_to_iokit(callback),
+                )
+            }
+        }
     }
 }

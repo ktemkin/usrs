@@ -2,7 +2,7 @@
 //! Backends can (and will) contain unsafe code, but they expose a safe interface here.
 
 use std::any::Any;
-use std::cell::{Cell, RefCell};
+use std::cell::RefCell;
 use std::rc::Rc;
 use std::sync::Arc;
 use std::time::{Duration, SystemTime};
@@ -135,7 +135,7 @@ pub trait Backend: std::fmt::Debug {
         buffer: Arc<RefCell<dyn AsMut<[u8]>>>,
         callback: Box<dyn FnOnce(UsbResult<usize>)>,
         timeout: Option<Duration>,
-    ) -> UsbResult<usize>;
+    ) -> UsbResult<()>;
 
     /// Writes to an endpoint, for e.g. bulk writes. Async.
     fn write_nonblocking(

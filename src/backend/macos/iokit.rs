@@ -12,16 +12,16 @@ use std::{
 use core_foundation_sys::{
     number::{kCFNumberSInt64Type, CFNumberGetValue, CFNumberRef},
     runloop::{
-        kCFRunLoopDefaultMode, CFRunLoopAddSource, CFRunLoopContainsSource, CFRunLoopGetCurrent,
-        CFRunLoopRunInMode, CFRunLoopSourceRef,
+        kCFRunLoopDefaultMode, CFRunLoopAddSource, CFRunLoopGetCurrent, CFRunLoopRunInMode,
+        CFRunLoopSourceRef,
     },
     string::{kCFStringEncodingUTF8, CFStringGetCStringPtr, CFStringRef},
     uuid::CFUUIDBytes,
 };
 use io_kit_sys::{
     kIORegistryIterateParents, kIORegistryIterateRecursively, keys::kIOServicePlane, ret::*,
-    types::io_iterator_t, IOAsyncCallback1, IONotificationPort, IONotificationPortDestroy,
-    IOObjectRelease, IORegistryEntrySearchCFProperty, CFSTR,
+    types::io_iterator_t, IOAsyncCallback1, IOObjectRelease, IORegistryEntrySearchCFProperty,
+    CFSTR,
 };
 use log::{error, warn};
 
@@ -555,6 +555,26 @@ impl OsInterface {
         ))
     }
 
+    /// Performs an async write.
+    pub fn write_nonblocking(
+        &self,
+        pipe_ref: u8,
+        data: *mut c_void,
+        data_length: u32,
+        callback: IOAsyncCallback1,
+        callback_arg: *mut c_void,
+    ) -> UsbResult<()> {
+        UsbResult::from_io_return(call_unsafe_iokit_function!(
+            self.interface,
+            WritePipeAsync,
+            pipe_ref,
+            data,
+            data_length,
+            callback,
+            callback_arg
+        ))
+    }
+
     /// Performs a write, with an associated timeout.
     pub fn write_with_timeout(&self, pipe_ref: u8, data: &[u8], timeout: u32) -> UsbResult<()> {
         UsbResult::from_io_return(call_unsafe_iokit_function!(
@@ -565,6 +585,29 @@ impl OsInterface {
             data.len() as u32,
             timeout,
             timeout
+        ))
+    }
+
+    /// Performs an async write.
+    pub fn write_with_timeout_nonblocking(
+        &self,
+        pipe_ref: u8,
+        data: *mut c_void,
+        data_length: u32,
+        callback: IOAsyncCallback1,
+        callback_arg: *mut c_void,
+        timeout: u32,
+    ) -> UsbResult<()> {
+        UsbResult::from_io_return(call_unsafe_iokit_function!(
+            self.interface,
+            WritePipeAsyncTO,
+            pipe_ref,
+            data,
+            data_length,
+            timeout,
+            timeout,
+            callback,
+            callback_arg
         ))
     }
 
@@ -581,6 +624,26 @@ impl OsInterface {
         ))?;
 
         Ok(size as usize)
+    }
+
+    /// Performs an async read.
+    pub fn read_nonblocking(
+        &self,
+        pipe_ref: u8,
+        data: *mut c_void,
+        data_length: u32,
+        callback: IOAsyncCallback1,
+        callback_arg: *mut c_void,
+    ) -> UsbResult<()> {
+        UsbResult::from_io_return(call_unsafe_iokit_function!(
+            self.interface,
+            ReadPipeAsync,
+            pipe_ref,
+            data,
+            data_length,
+            callback,
+            callback_arg
+        ))
     }
 
     /// Performs a write, with an associated timeout.
@@ -603,6 +666,29 @@ impl OsInterface {
         ))?;
 
         Ok(size as usize)
+    }
+
+    /// Performs an async read.
+    pub fn read_with_timeout_nonblocking(
+        &self,
+        pipe_ref: u8,
+        data: *mut c_void,
+        data_length: u32,
+        callback: IOAsyncCallback1,
+        callback_arg: *mut c_void,
+        timeout: u32,
+    ) -> UsbResult<()> {
+        UsbResult::from_io_return(call_unsafe_iokit_function!(
+            self.interface,
+            ReadPipeAsyncTO,
+            pipe_ref,
+            data,
+            data_length,
+            timeout,
+            timeout,
+            callback,
+            callback_arg
+        ))
     }
 
     /// Clears the stall condition on the provided PipeRef.

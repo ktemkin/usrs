@@ -10,10 +10,10 @@ use std::{
     time,
 };
 
-use core_foundation_sys::base::{mach_port_t, SInt32};
+use core_foundation_sys::base::SInt32;
 use io_kit_sys::{
     ret::{kIOReturnNoResources, kIOReturnSuccess},
-    IOIteratorNext, IOMasterPort, IONotificationPortCreate, IONotificationPortGetRunLoopSource,
+    IOIteratorNext,
 };
 use log::{debug, error};
 
@@ -26,12 +26,12 @@ use super::{
     endpoint::{address_for_in_endpoint, address_for_out_endpoint},
     interface::interface_from_service,
     iokit::{
-        self, get_iokit_numeric_device_property, usb_device_type_id, IOKitEmptyResultExtension,
-        IoObject, NotificationSource, OsDevice, OsInterface, PluginInterface,
+        self, get_iokit_numeric_device_property, usb_device_type_id, IoObject, NotificationSource,
+        OsDevice, OsInterface, PluginInterface,
     },
     iokit_c::{
         kIOCFPlugInInterfaceID, kIOUsbDeviceUserClientTypeID, IOCFPlugInInterface,
-        IOCreatePlugInInterfaceForService, MACH_PORT_NULL,
+        IOCreatePlugInInterfaceForService,
     },
 };
 
