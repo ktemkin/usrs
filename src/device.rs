@@ -5,8 +5,11 @@ use std::{rc::Rc, time::Duration};
 use crate::{
     backend::{Backend, BackendDevice},
     request::{DescriptorType, RequestType, StandardDeviceRequest, STANDARD_IN_FROM_DEVICE},
-    AsyncCallback, Error, ReadBuffer, UsbResult, WriteBuffer,
+    Error, ReadBuffer, UsbResult, WriteBuffer,
 };
+
+#[cfg(feature = "callbacks")]
+use crate::AsyncCallback;
 
 #[cfg(feature = "async")]
 use crate::futures::UsbFuture;
