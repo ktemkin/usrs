@@ -26,3 +26,7 @@ pub type ReadBuffer = Arc<RefCell<dyn AsMut<[u8]>>>;
 /// Type used for asynchronous write operations.
 #[cfg(feature = "async")]
 pub type WriteBuffer = Arc<dyn AsRef<[u8]>>;
+
+/// Type used for callbacks in the callback-model async functions.
+#[cfg(feature = "callbacks")]
+pub type AsyncCallback = Box<dyn FnOnce(UsbResult<usize>)>;

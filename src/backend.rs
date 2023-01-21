@@ -2,13 +2,12 @@
 //! Backends can (and will) contain unsafe code, but they expose a safe interface here.
 
 use std::any::Any;
-use std::cell::RefCell;
 use std::rc::Rc;
-use std::sync::Arc;
 use std::time::{Duration, SystemTime};
 
 use crate::device::{Device, DeviceInformation};
 use crate::error::UsbResult;
+use crate::{ReadBuffer, WriteBuffer};
 
 #[cfg(target_os = "macos")]
 mod macos;
@@ -79,7 +78,7 @@ pub trait Backend: std::fmt::Debug {
         request_number: u8,
         value: u16,
         index: u16,
-        target: Arc<RefCell<dyn AsMut<[u8]>>>,
+        target: ReadBuffer,
         callback: Box<dyn FnOnce(UsbResult<usize>)>,
         timeout: Option<Duration>,
     ) -> UsbResult<()>;
@@ -104,7 +103,7 @@ pub trait Backend: std::fmt::Debug {
         request_number: u8,
         value: u16,
         index: u16,
-        data: Arc<dyn AsRef<[u8]>>,
+        data: WriteBuffer,
         callback: Box<dyn FnOnce(UsbResult<usize>)>,
         timeout: Option<Duration>,
     ) -> UsbResult<()>;
@@ -132,7 +131,7 @@ pub trait Backend: std::fmt::Debug {
         &self,
         device: &Device,
         endpoint: u8,
-        buffer: Arc<RefCell<dyn AsMut<[u8]>>>,
+        buffer: ReadBuffer,
         callback: Box<dyn FnOnce(UsbResult<usize>)>,
         timeout: Option<Duration>,
     ) -> UsbResult<()>;
@@ -142,14 +141,12 @@ pub trait Backend: std::fmt::Debug {
         &self,
         device: &Device,
         endpoint: u8,
-        data: Arc<dyn AsRef<[u8]>>,
+        data: WriteBuffer,
         callback: Box<dyn FnOnce(UsbResult<usize>)>,
         timeout: Option<Duration>,
     ) -> UsbResult<()>;
 
     // TODO:
-    // - Async control requests.
-    // - Async bulk requests.
     // - Isochronous???
 }
 

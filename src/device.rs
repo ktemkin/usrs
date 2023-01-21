@@ -1,11 +1,11 @@
 //! Interface for working with USB devices.
 
-use std::{cell::RefCell, rc::Rc, sync::Arc, time::Duration};
+use std::{rc::Rc, time::Duration};
 
 use crate::{
     backend::{Backend, BackendDevice},
     request::{DescriptorType, RequestType, StandardDeviceRequest, STANDARD_IN_FROM_DEVICE},
-    Error, ReadBuffer, UsbResult,
+    AsyncCallback, Error, ReadBuffer, UsbResult, WriteBuffer,
 };
 
 #[cfg(feature = "async")]
@@ -202,8 +202,8 @@ impl Device {
         request_number: u8,
         value: u16,
         index: u16,
-        target: Arc<RefCell<dyn AsMut<[u8]>>>,
-        callback: Box<dyn FnOnce(UsbResult<usize>)>,
+        target: ReadBuffer,
+        callback: AsyncCallback,
         timeout: Option<Duration>,
     ) -> UsbResult<()> {
         self.backend.control_read_nonblocking(
@@ -236,7 +236,7 @@ impl Device {
         request_number: u8,
         value: u16,
         index: u16,
-        target: Arc<RefCell<dyn AsMut<[u8]>>>,
+        target: ReadBuffer,
         timeout: Option<Duration>,
     ) -> UsbResult<UsbFuture> {
         // Create the future, and get a copy of it for our inner callback API,
@@ -318,18 +318,96 @@ impl Device {
         request_number: u8,
         value: u16,
         index: u16,
-        target: &mut [u8],
+        data: &[u8],
         timeout: Option<Duration>,
-    ) -> UsbResult<usize> {
-        self.backend.control_read(
+    ) -> UsbResult<()> {
+        self.backend.control_write(
+            self,
+            request_type.into(),
+            request_number,
+            value,
+            index,
+            data,
+            timeout,
+        )
+    }
+
+    /// Performs an asynchronous OUT control request, with the following parameters:
+    /// - [request_type] specifies the USB control request type. It's recommended this is
+    /// - [request_number] is the request number. See e.g. USB 2.0 Chapter 9.
+    /// - [value] and [index] are arguments to the request. For requests with a recipient
+    ///   other than the device, [index] is usually the index of the target. See USB 2.0 Chapter 9.
+    /// - [data] is the data to be transmitted as part of the request. It must be between [0, 65535]B.
+    /// - [timeout] is how long we should wait for the request. If not provided, we'll wait
+    ///   indefinitely.
+    ///
+    /// The provided callback is called once the operation completes, and receives the actual
+    /// length written (or status, on failure).
+    #[cfg(feature = "callbacks")]
+    pub fn control_write_and_call_back(
+        &mut self,
+        request_type: RequestType,
+        request_number: u8,
+        value: u16,
+        index: u16,
+        data: WriteBuffer,
+        callback: AsyncCallback,
+        timeout: Option<Duration>,
+    ) -> UsbResult<()> {
+        self.backend.control_write_nonblocking(
+            self,
+            request_type.into(),
+            request_number,
+            value,
+            index,
+            data,
+            callback,
+            timeout,
+        )
+    }
+
+    /// Performs an asynchronous IN control request, with the following parameters:
+    /// - [request_type] specifies the USB control request type. It's recommended this is
+    /// - [request_number] is the request number. See e.g. USB 2.0 Chapter 9.
+    /// - [value] and [index] are arguments to the request. For requests with a recipient
+    ///   other than the device, [index] is usually the index of the target. See USB 2.0 Chapter 9.
+    /// - [target] is the data to be transmitted as part of the request. It must be between [0, 65535]B.
+    /// - [timeout] is how long we should wait for the request. If not provided, we'll wait
+    ///   indefinitely.
+    ///
+    /// Like a typical async function, this method returns a future. However, since _submission_
+    /// can fail before the asynchronous component, the future is wrapped in a UsbResult.
+    #[cfg(feature = "async")]
+    pub fn control_write_async(
+        &mut self,
+        request_type: RequestType,
+        request_number: u8,
+        value: u16,
+        index: u16,
+        target: WriteBuffer,
+        timeout: Option<Duration>,
+    ) -> UsbResult<UsbFuture> {
+        // Create the future, and get a copy of it for our inner callback API,
+        // because everyone needs to get themselves a copy.
+        let future = UsbFuture::new();
+        let shared_state = future.clone_state();
+
+        // Convert our inner callback-API into an async API by having our callback just... complete the future.
+        let callback = Box::new(move |result| shared_state.lock().unwrap().complete(result));
+
+        // Finally, trigger the actual async control write.
+        self.backend.control_write_nonblocking(
             self,
             request_type.into(),
             request_number,
             value,
             index,
             target,
+            callback,
             timeout,
-        )
+        )?;
+
+        Ok(future)
     }
 
     /// Performs an unchecked IN control request.
@@ -457,6 +535,44 @@ impl Device {
         self.backend.read(self, endpoint, buffer, timeout)
     }
 
+    /// Performs an asynchronous write to the provided endpoint.
+    /// Usable for bulk and interrupt writes.
+    #[cfg(feature = "callbacks")]
+    pub fn read_and_call_back(
+        &mut self,
+        endpoint: u8,
+        buffer: ReadBuffer,
+        callback: AsyncCallback,
+        timeout: Option<Duration>,
+    ) -> UsbResult<()> {
+        self.backend
+            .read_nonblocking(self, endpoint, buffer, callback, timeout)
+    }
+
+    /// Performs an asynchronous read to the provided endpoint.
+    /// Usable for bulk and interrupt reads.
+    #[cfg(feature = "async")]
+    pub fn read_async(
+        &mut self,
+        endpoint: u8,
+        buffer: ReadBuffer,
+        timeout: Option<Duration>,
+    ) -> UsbResult<UsbFuture> {
+        // Create the future, and get a copy of it for our inner callback API,
+        // because everyone needs to get themselves a copy.
+        let future = UsbFuture::new();
+        let shared_state = future.clone_state();
+
+        // Convert our inner callback-API into an async API by having our callback just... complete the future.
+        let callback = Box::new(move |result| shared_state.lock().unwrap().complete(result));
+
+        // Finally, trigger the actual async read.
+        self.backend
+            .read_nonblocking(self, endpoint, buffer, callback, timeout)?;
+
+        Ok(future)
+    }
+
     /// Performs a read from the provided endpoint.
     /// Usable for bulk and interrupt reads.
     ///
@@ -493,6 +609,44 @@ impl Device {
     /// Usable for bulk and interrupt writes.
     pub fn write(&mut self, endpoint: u8, data: &[u8], timeout: Option<Duration>) -> UsbResult<()> {
         self.backend.write(self, endpoint, data, timeout)
+    }
+
+    /// Performs an asynchronous write to the provided endpoint.
+    /// Usable for bulk and interrupt writes.
+    #[cfg(feature = "callbacks")]
+    pub fn write_and_call_back(
+        &mut self,
+        endpoint: u8,
+        data: WriteBuffer,
+        callback: AsyncCallback,
+        timeout: Option<Duration>,
+    ) -> UsbResult<()> {
+        self.backend
+            .write_nonblocking(self, endpoint, data, callback, timeout)
+    }
+
+    /// Performs an asynchronous write to the provided endpoint.
+    /// Usable for bulk and interrupt writes.
+    #[cfg(feature = "async")]
+    pub fn write_async(
+        &mut self,
+        endpoint: u8,
+        data: WriteBuffer,
+        timeout: Option<Duration>,
+    ) -> UsbResult<UsbFuture> {
+        // Create the future, and get a copy of it for our inner callback API,
+        // because everyone needs to get themselves a copy.
+        let future = UsbFuture::new();
+        let shared_state = future.clone_state();
+
+        // Convert our inner callback-API into an async API by having our callback just... complete the future.
+        let callback = Box::new(move |result| shared_state.lock().unwrap().complete(result));
+
+        // Finally, trigger the actual async write.
+        self.backend
+            .write_nonblocking(self, endpoint, data, callback, timeout)?;
+
+        Ok(future)
     }
 
     /// Gains access to the device's per-backend data.
