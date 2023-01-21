@@ -1,11 +1,19 @@
 //! Backend tools for opening and working with devices.
 
-use std::{collections::HashMap, ffi::c_void, time};
+use std::{
+    collections::HashMap,
+    ffi::c_void,
+    sync::{
+        atomic::{AtomicBool, Ordering},
+        Arc,
+    },
+    time,
+};
 
-use core_foundation_sys::base::SInt32;
+use core_foundation_sys::base::{mach_port_t, SInt32};
 use io_kit_sys::{
     ret::{kIOReturnNoResources, kIOReturnSuccess},
-    IOIteratorNext,
+    IOIteratorNext, IOMasterPort, IONotificationPortCreate, IONotificationPortGetRunLoopSource,
 };
 use log::{debug, error};
 
@@ -18,12 +26,12 @@ use super::{
     endpoint::{address_for_in_endpoint, address_for_out_endpoint},
     interface::interface_from_service,
     iokit::{
-        self, get_iokit_numeric_device_property, usb_device_type_id, IoObject, OsDevice,
-        OsInterface, PluginInterface,
+        self, get_iokit_numeric_device_property, usb_device_type_id, IOKitEmptyResultExtension,
+        IoObject, NotificationSource, OsDevice, OsInterface, PluginInterface,
     },
     iokit_c::{
         kIOCFPlugInInterfaceID, kIOUsbDeviceUserClientTypeID, IOCFPlugInInterface,
-        IOCreatePlugInInterfaceForService,
+        IOCreatePlugInInterfaceForService, MACH_PORT_NULL,
     },
 };
 
@@ -58,10 +66,38 @@ pub(crate) struct MacOsDevice {
     /// Metadata associated with each endpoint _address_.
     /// Contains the information necessary to work with an endpoint.
     pub(crate) endpoint_metadata: HashMap<u8, EndpointInformation>,
+
+    /// Flag used to indicate when this device is being dropped, and thus its thread should die.
+    pub(crate) termination_flag: Arc<AtomicBool>,
 }
 
 impl MacOsDevice {
-    fn populate_interfaces(&mut self) -> UsbResult<()> {
+    /*
+    /// Opens an IOKit notification port, providing a RunLoopSource that can be used to
+    /// subscribe to asynchronous event callbacks. This is necessary for properly using the IOKit
+    /// device and interface Async APIs.
+    fn open_notification_source() -> UsbResult<NotificationSource> {
+        unsafe {
+            // First, open a new Mach port to IOKit, which we can use to subscribe to async events.
+            let mut main_port: mach_port_t = 0;
+            UsbResult::from_io_return(IOMasterPort(MACH_PORT_NULL, &mut main_port))?;
+
+            // ... and use that to create a notification port, which we can attach our per-device
+            // and per-interface asynchronous events to.
+            let port = IONotificationPortCreate(main_port);
+            let source = IONotificationPortGetRunLoopSource(port);
+
+            Ok(NotificationSource::new(port, source))
+        }
+    }
+    */
+
+    /// Populates the internal list of interfaces. Each interface provides the object we'll need
+    /// to perform an operation on its associated non-EP0 endpoint(s).
+    fn populate_interfaces(
+        &mut self,
+        notification_sources: &mut Vec<NotificationSource>,
+    ) -> UsbResult<()> {
         unsafe {
             // Get an interface iterator, which will allow use to walk the device's interfaces...
             let interface_iterator = self.device.create_interface_iterator()?;
@@ -92,6 +128,9 @@ impl MacOsDevice {
                     Err(e) => return Err(e),
                     Ok(interface) => interface,
                 };
+
+                // ... subscribe to per-interface events...
+                notification_sources.push(interface.notification_source()?);
 
                 // ... and populate the associated endpoint data...
                 _ = self.populate_endpoint_metadata(&mut interface);
@@ -161,6 +200,13 @@ impl BackendDevice for MacOsDevice {
 
     fn as_any(&self) -> &dyn std::any::Any {
         self
+    }
+}
+
+impl Drop for MacOsDevice {
+    fn drop(&mut self) {
+        // Let our event thread know it can stop running, as we're no longer sending it events.
+        self.termination_flag.store(true, Ordering::Relaxed);
     }
 }
 
@@ -249,13 +295,24 @@ fn open_usb_device_from_io_device(device_service: IoService) -> UsbResult<Box<dy
                 device: OsDevice::new(raw_device),
                 interfaces: HashMap::new(),
                 endpoint_metadata: HashMap::new(),
+                termination_flag: Arc::new(AtomicBool::new(false)),
             });
 
             // .. open the device, since we said we'd do so...
             backend_device.device.open()?;
 
+            // .. subscribe to per-device asynchronous events ...
+            let mut notification_sources: Vec<NotificationSource> = vec![];
+            notification_sources.push(backend_device.device.notification_source()?);
+
             // ... ask it to populate its interfaces, and endpoint metadata ...
-            backend_device.populate_interfaces()?;
+            backend_device.populate_interfaces(&mut notification_sources)?;
+
+            // ... spin up a thread to handle its events ...
+            let termination_condition = Arc::clone(&backend_device.termination_flag);
+            std::thread::spawn(move || {
+                NotificationSource::run_event_loop(notification_sources, termination_condition)
+            });
 
             // ... and return it.
             return Ok(backend_device);

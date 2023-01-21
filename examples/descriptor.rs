@@ -1,6 +1,6 @@
 //! Example that reads USB descriptors from a specified device.
 
-use usrs::request::DescriptorType;
+use usrs::request::{DescriptorType, STANDARD_IN_FROM_DEVICE};
 use usrs::{device, open, DeviceSelector};
 
 fn main() -> Result<(), Box<dyn std::error::Error>> {
@@ -19,7 +19,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     // ... and ask for its device descriptor.
     let descriptor = t5_headset.read_standard_descriptor(DescriptorType::Device, 0)?;
-
     dbg!(descriptor);
+
     Ok(())
 }

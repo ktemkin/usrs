@@ -1,20 +1,25 @@
 //! Core, low-level functionality for macOS.
 
 use std::{
+    borrow::{Borrow, BorrowMut},
+    cell::{Cell, RefCell},
     ffi::c_void,
+    sync::Arc,
     time::{Duration, SystemTime},
 };
 
 use self::{
+    callback::{delegate_iousb_callback, CallbackRefconType},
     device::{open_usb_device, MacOsDevice},
     endpoint::{address_for_in_endpoint, address_for_out_endpoint},
-    iokit::{to_iokit_timeout, OsDevice, OsInterface},
+    iokit::{leak_to_iokit, to_iokit_timeout, OsDevice, OsInterface},
     iokit_c::IOUSBDevRequest,
 };
 
 use super::{Backend, BackendDevice, DeviceInformation};
 use crate::{backend::macos::iokit_c::IOUSBDevRequestTO, device::Device, error::UsbResult, Error};
 
+mod callback;
 mod device;
 mod endpoint;
 mod enumeration;
@@ -104,6 +109,68 @@ impl MacOsBackend {
             // And finally, perform the request.
             device.device_request(&mut request_struct)?;
             Ok(request_struct.wLenDone as usize)
+        }
+    }
+
+    /// Helper for issuing async control requests.
+    unsafe fn control_nonblocking(
+        &self,
+        device: &Device,
+        request_type: u8,
+        request_number: u8,
+        value: u16,
+        index: u16,
+        data: *mut c_void,
+        length: u16,
+        callback: Box<CallbackRefconType>,
+        timeout: Option<Duration>,
+    ) -> UsbResult<()> {
+        // Unpack the raw OS device from inside of our USRs device.
+        let device = self.os_device_for(device);
+
+        // If we have a timeout, use the *TO request function.
+        if let Some(timeout) = timeout {
+            let timeout_ms = to_iokit_timeout(timeout);
+
+            // Populate the request-with-TimeOut structure, which will be passed to macOS.
+            let mut request_struct = IOUSBDevRequestTO {
+                bmRequestType: request_type,
+                bRequest: request_number,
+                wValue: value,
+                wIndex: index,
+                wLength: length,
+                pData: data,
+                wLenDone: 0,
+                noDataTimeout: timeout_ms,
+                completionTimeout: timeout_ms,
+            };
+
+            // And finally, perform the request.
+            device.device_request_nonblocking_with_timeout(
+                &mut request_struct,
+                delegate_iousb_callback,
+                leak_to_iokit(callback),
+            )?;
+            Ok(())
+        } else {
+            // Populate the (no timeout) request structure, which will be passed to macOS.
+            let mut request_struct = IOUSBDevRequest {
+                bmRequestType: request_type,
+                bRequest: request_number,
+                wValue: value,
+                wIndex: index,
+                wLength: length,
+                pData: data,
+                wLenDone: 0,
+            };
+
+            // And finally, perform the request.
+            device.device_request_nonblocking(
+                &mut request_struct,
+                delegate_iousb_callback,
+                leak_to_iokit(callback),
+            )?;
+            Ok(())
         }
     }
 
@@ -306,6 +373,76 @@ impl Backend for MacOsBackend {
         }
     }
 
+    fn control_read_nonblocking(
+        &self,
+        device: &Device,
+        request_type: u8,
+        request_number: u8,
+        value: u16,
+        index: u16,
+        target: Arc<RefCell<dyn AsMut<[u8]>>>,
+        callback: Box<CallbackRefconType>,
+        timeout: Option<Duration>,
+    ) -> UsbResult<()> {
+        unsafe {
+            // Extract the data we were passed from the user, so we can pass it to IOKit.
+            let mut data_dyn = (*target).borrow_mut();
+            let data = data_dyn.as_mut();
+
+            // If the data is too long for a control request, error out.
+            if data.len() > (u16::MAX as usize) {
+                return Err(Error::Overrun);
+            }
+
+            self.control_nonblocking(
+                device,
+                request_type,
+                request_number,
+                value,
+                index,
+                data.as_ptr() as *mut c_void,
+                data.len() as u16,
+                callback,
+                timeout,
+            )?;
+            Ok(())
+        }
+    }
+
+    fn control_write_nonblocking(
+        &self,
+        device: &Device,
+        request_type: u8,
+        request_number: u8,
+        value: u16,
+        index: u16,
+        data: Arc<dyn AsRef<[u8]>>,
+        callback: Box<CallbackRefconType>,
+        timeout: Option<Duration>,
+    ) -> UsbResult<()> {
+        unsafe {
+            let data = (*data).as_ref();
+
+            // If the data is too long for a control request, error out.
+            if data.len() > (u16::MAX as usize) {
+                return Err(Error::Overrun);
+            }
+
+            self.control_nonblocking(
+                device,
+                request_type,
+                request_number,
+                value,
+                index,
+                data.as_ptr() as *mut c_void,
+                data.len() as u16,
+                callback,
+                timeout,
+            )?;
+            Ok(())
+        }
+    }
+
     fn read(
         &self,
         device: &Device,
@@ -340,5 +477,27 @@ impl Backend for MacOsBackend {
                 interface.write(pipe_ref, data)
             }
         }
+    }
+
+    fn read_nonblocking(
+        &self,
+        device: &Device,
+        endpoint: u8,
+        buffer: Arc<RefCell<dyn AsMut<[u8]>>>,
+        callback: Box<dyn FnOnce(UsbResult<usize>)>,
+        timeout: Option<Duration>,
+    ) -> UsbResult<usize> {
+        todo!()
+    }
+
+    fn write_nonblocking(
+        &self,
+        device: &Device,
+        endpoint: u8,
+        data: Arc<dyn AsRef<[u8]>>,
+        callback: Box<dyn FnOnce(UsbResult<usize>)>,
+        timeout: Option<Duration>,
+    ) -> UsbResult<()> {
+        todo!()
     }
 }

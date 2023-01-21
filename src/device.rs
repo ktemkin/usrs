@@ -1,6 +1,6 @@
 //! Interface for working with USB devices.
 
-use std::{rc::Rc, time::Duration};
+use std::{cell::RefCell, rc::Rc, sync::Arc, time::Duration};
 
 use crate::{
     backend::{Backend, BackendDevice},
@@ -159,6 +159,8 @@ impl Device {
     /// - [target] is the data to be transmitted as part of the request. It must be between [0, 65535]B.
     /// - [timeout] is how long we should wait for the request. If not provided, we'll wait
     ///   indefinitely.
+    ///
+    /// Returns the actual length read.
     pub fn control_read(
         &mut self,
         request_type: RequestType,
@@ -175,6 +177,40 @@ impl Device {
             value,
             index,
             target,
+            timeout,
+        )
+    }
+
+    /// Performs an asynchronous IN control request, with the following parameters:
+    /// - [request_type] specifies the USB control request type. It's recommended this is
+    /// - [request_number] is the request number. See e.g. USB 2.0 Chapter 9.
+    /// - [value] and [index] are arguments to the request. For requests with a recipient
+    ///   other than the device, [index] is usually the index of the target. See USB 2.0 Chapter 9.
+    /// - [target] is the data to be transmitted as part of the request. It must be between [0, 65535]B.
+    /// - [timeout] is how long we should wait for the request. If not provided, we'll wait
+    ///   indefinitely.
+    ///
+    /// The provided callback is called once the operation completes, and receives the actual
+    /// length read (or status, on failure).
+    #[cfg(feature = "callbacks")]
+    pub fn control_read_and_call_back(
+        &mut self,
+        request_type: RequestType,
+        request_number: u8,
+        value: u16,
+        index: u16,
+        target: Arc<RefCell<dyn AsMut<[u8]>>>,
+        callback: Box<dyn FnOnce(UsbResult<usize>)>,
+        timeout: Option<Duration>,
+    ) -> UsbResult<()> {
+        self.backend.control_read_nonblocking(
+            self,
+            request_type.into(),
+            request_number,
+            value,
+            index,
+            target,
+            callback,
             timeout,
         )
     }

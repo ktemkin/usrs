@@ -24,6 +24,7 @@ use io_kit_sys::{
 
 //
 // Constants.
+//
 const SYS_IOKIT: c_int = ((0x38) & 0x3f) << 26;
 const SUB_IOKIT_USB: c_int = ((1) & 0xfff) << 14;
 
@@ -56,6 +57,8 @@ pub(crate) const kIOUSBTransactionReturned: c_int = SYS_IOKIT | SUB_IOKIT_USB | 
 pub(crate) const kIOUSBTransactionTimeout: c_int = SYS_IOKIT | SUB_IOKIT_USB | 0x51;
 
 pub(crate) const kIOUSBFindInterfaceDontCare: UInt16 = 0xFFFF;
+
+pub(crate) const MACH_PORT_NULL: u32 = 0;
 
 //
 

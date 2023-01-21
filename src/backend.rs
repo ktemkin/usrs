@@ -2,7 +2,9 @@
 //! Backends can (and will) contain unsafe code, but they expose a safe interface here.
 
 use std::any::Any;
+use std::cell::{Cell, RefCell};
 use std::rc::Rc;
+use std::sync::Arc;
 use std::time::{Duration, SystemTime};
 
 use crate::device::{Device, DeviceInformation};
@@ -69,6 +71,19 @@ pub trait Backend: std::fmt::Debug {
         timeout: Option<Duration>,
     ) -> UsbResult<usize>;
 
+    /// Performs an IN control request.
+    fn control_read_nonblocking(
+        &self,
+        device: &Device,
+        request_type: u8,
+        request_number: u8,
+        value: u16,
+        index: u16,
+        target: Arc<RefCell<dyn AsMut<[u8]>>>,
+        callback: Box<dyn FnOnce(UsbResult<usize>)>,
+        timeout: Option<Duration>,
+    ) -> UsbResult<()>;
+
     /// Performs an OUT control request.
     fn control_write(
         &self,
@@ -78,6 +93,19 @@ pub trait Backend: std::fmt::Debug {
         value: u16,
         index: u16,
         data: &[u8],
+        timeout: Option<Duration>,
+    ) -> UsbResult<()>;
+
+    /// Performs an IN control request.
+    fn control_write_nonblocking(
+        &self,
+        device: &Device,
+        request_type: u8,
+        request_number: u8,
+        value: u16,
+        index: u16,
+        data: Arc<dyn AsRef<[u8]>>,
+        callback: Box<dyn FnOnce(UsbResult<usize>)>,
         timeout: Option<Duration>,
     ) -> UsbResult<()>;
 
@@ -96,6 +124,26 @@ pub trait Backend: std::fmt::Debug {
         device: &Device,
         endpoint: u8,
         data: &[u8],
+        timeout: Option<Duration>,
+    ) -> UsbResult<()>;
+
+    /// Reads from an endpoint, for e.g. bulk reads. Async.
+    fn read_nonblocking(
+        &self,
+        device: &Device,
+        endpoint: u8,
+        buffer: Arc<RefCell<dyn AsMut<[u8]>>>,
+        callback: Box<dyn FnOnce(UsbResult<usize>)>,
+        timeout: Option<Duration>,
+    ) -> UsbResult<usize>;
+
+    /// Writes to an endpoint, for e.g. bulk writes. Async.
+    fn write_nonblocking(
+        &self,
+        device: &Device,
+        endpoint: u8,
+        data: Arc<dyn AsRef<[u8]>>,
+        callback: Box<dyn FnOnce(UsbResult<usize>)>,
         timeout: Option<Duration>,
     ) -> UsbResult<()>;
 

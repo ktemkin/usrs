@@ -2,17 +2,26 @@
 
 use std::{
     ffi::{c_void, CStr, CString},
+    sync::{
+        atomic::{AtomicBool, Ordering},
+        Arc,
+    },
     time::Duration,
 };
 
 use core_foundation_sys::{
     number::{kCFNumberSInt64Type, CFNumberGetValue, CFNumberRef},
+    runloop::{
+        kCFRunLoopDefaultMode, CFRunLoopAddSource, CFRunLoopContainsSource, CFRunLoopGetCurrent,
+        CFRunLoopRunInMode, CFRunLoopSourceRef,
+    },
     string::{kCFStringEncodingUTF8, CFStringGetCStringPtr, CFStringRef},
     uuid::CFUUIDBytes,
 };
 use io_kit_sys::{
     kIORegistryIterateParents, kIORegistryIterateRecursively, keys::kIOServicePlane, ret::*,
-    types::io_iterator_t, IOObjectRelease, IORegistryEntrySearchCFProperty, CFSTR,
+    types::io_iterator_t, IOAsyncCallback1, IONotificationPort, IONotificationPortDestroy,
+    IOObjectRelease, IORegistryEntrySearchCFProperty, CFSTR,
 };
 use log::{error, warn};
 
@@ -128,6 +137,58 @@ impl Drop for PluginInterface {
     }
 }
 
+/// Wrapper around a Notification Port types that automatically close them
+/// when necessary.
+#[derive(Debug)]
+pub(crate) struct NotificationSource {
+    /// The notification source used as an async event target, and to pass to
+    /// event loops, so we can await async events.
+    source: CFRunLoopSourceRef,
+}
+
+impl NotificationSource {
+    pub(crate) fn new(source: CFRunLoopSourceRef) -> Self {
+        Self { source }
+    }
+
+    pub(crate) fn source(&self) -> CFRunLoopSourceRef {
+        self.source
+    }
+
+    /// Creates a run-loop that will run call-backs for this notification-source.
+    pub(crate) fn run_event_loop(
+        notification_sources: Vec<NotificationSource>,
+        termination_flag: Arc<AtomicBool>,
+    ) -> UsbResult<()> {
+        unsafe {
+            // Add each of our notification sources to our event loop...
+            let runloop = CFRunLoopGetCurrent();
+            for source in notification_sources {
+                CFRunLoopAddSource(runloop, source.source(), kCFRunLoopDefaultMode);
+            }
+
+            // ... and run it.
+            loop {
+                // Let the runloop run for our specified "stop granularity", after which it'll
+                // pop back here to  check the termination condition.
+                const RUNLOOP_STOP_GRANULARITY: Duration = Duration::from_secs(1);
+                CFRunLoopRunInMode(
+                    kCFRunLoopDefaultMode,
+                    RUNLOOP_STOP_GRANULARITY.as_secs_f64(),
+                    false as u8,
+                );
+
+                // If our device is no longer around, we won't be getting any events -- so we can
+                if termination_flag.load(Ordering::Relaxed) {
+                    return Ok(());
+                }
+            }
+        }
+    }
+}
+
+unsafe impl Send for NotificationSource {}
+
 // Wrapper around a **UsbDevice that helps us poke at its innards.
 #[derive(Debug)]
 pub(crate) struct OsDevice {
@@ -205,12 +266,46 @@ impl OsDevice {
     }
 
     /// Performs a control request on the device, without wrapping the unsafe behavior of
-    /// the contained IOUSbDevRequest. See also [[device_request_with_timeout]].
+    /// the contained IOUSbDevRequest. See also [device_request_with_timeout].
     pub fn device_request(&self, request: &mut IOUSBDevRequest) -> UsbResult<()> {
         UsbResult::from_io_return(call_unsafe_iokit_function!(
             self.device,
             DeviceRequest,
             request
+        ))
+    }
+
+    /// Performs an async control request on the device, without wrapping the unsafe behavior of
+    /// the contained IOUSbDevRequest. See also [device_request_nonblocking_with_timeout].
+    pub fn device_request_nonblocking(
+        &self,
+        request: &mut IOUSBDevRequest,
+        callback: IOAsyncCallback1,
+        callback_arg: *mut c_void,
+    ) -> UsbResult<()> {
+        UsbResult::from_io_return(call_unsafe_iokit_function!(
+            self.device,
+            DeviceRequestAsync,
+            request,
+            callback,
+            callback_arg
+        ))
+    }
+
+    /// Performs an async control request on the device, without wrapping the unsafe behavior of
+    /// the contained IOUSbDevRequest. See also [device_request_nonblocking].
+    pub fn device_request_nonblocking_with_timeout(
+        &self,
+        request: &mut IOUSBDevRequestTO,
+        callback: IOAsyncCallback1,
+        callback_arg: *mut c_void,
+    ) -> UsbResult<()> {
+        UsbResult::from_io_return(call_unsafe_iokit_function!(
+            self.device,
+            DeviceRequestAsyncTO,
+            request,
+            callback,
+            callback_arg
         ))
     }
 
@@ -266,6 +361,31 @@ impl OsDevice {
 
         // ... and pack it all up nicely in an IoObject for our user.
         Ok(IoObject::new(iterator))
+    }
+
+    /// Attaches whole-device asynchronous events to the provided event source,
+    /// which can be then later attached to a CFRunLoop to run event callbacks.
+    pub(crate) fn attach_async_events(
+        &self,
+        notification_source: &mut NotificationSource,
+    ) -> UsbResult<()> {
+        UsbResult::from_io_return(call_unsafe_iokit_function!(
+            self.device,
+            CreateDeviceAsyncEventSource,
+            &mut notification_source.source()
+        ))
+    }
+
+    pub(crate) fn notification_source(&self) -> UsbResult<NotificationSource> {
+        let mut raw_source: CFRunLoopSourceRef = std::ptr::null_mut();
+
+        UsbResult::from_io_return(call_unsafe_iokit_function!(
+            self.device,
+            CreateDeviceAsyncEventSource,
+            &mut raw_source
+        ))?;
+
+        Ok(NotificationSource::new(raw_source))
     }
 
     /// Closes the active USB device.
@@ -510,6 +630,31 @@ impl OsInterface {
         ))
     }
 
+    /// Attaches per-interface asynchronous events to the provided event source,
+    /// which can be then later attached to a CFRunLoop to run event callbacks.
+    pub(crate) fn attach_async_events(
+        &self,
+        notification_source: &mut NotificationSource,
+    ) -> UsbResult<()> {
+        UsbResult::from_io_return(call_unsafe_iokit_function!(
+            self.interface,
+            CreateInterfaceAsyncEventSource,
+            &mut notification_source.source()
+        ))
+    }
+
+    pub(crate) fn notification_source(&self) -> UsbResult<NotificationSource> {
+        let mut raw_source: CFRunLoopSourceRef = std::ptr::null_mut();
+
+        UsbResult::from_io_return(call_unsafe_iokit_function!(
+            self.interface,
+            CreateInterfaceAsyncEventSource,
+            &mut raw_source
+        ))?;
+
+        Ok(NotificationSource::new(raw_source))
+    }
+
     /// Closes the active USB interface.
     pub fn close(&mut self) {
         if !self.is_open {
@@ -708,4 +853,19 @@ pub(crate) fn to_iokit_timeout(timeout: Duration) -> u32 {
     }
 
     timeout_ms
+}
+
+/// Helper function that moves an object out of Rust's memory model, for use by IOKit.
+pub(crate) fn leak_to_iokit<T>(object: T) -> *mut c_void {
+    Box::into_raw(Box::new(object)) as *mut c_void
+}
+
+/// Helper function that recovers an object that was leaked with `leak_to_iokit`.
+pub(crate) fn unleak_from_iokit<T>(pointer: *mut c_void) -> T {
+    unsafe {
+        let typed = pointer as *mut T;
+        let boxed = Box::from_raw(typed);
+
+        *boxed
+    }
 }

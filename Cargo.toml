@@ -13,6 +13,9 @@ name = "lsusrs"
 [[example]]
 name = "descriptor"
 
+[features]
+callbacks = []
+
 [dependencies]
 log = "0.4.17"
 
