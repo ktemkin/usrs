@@ -145,6 +145,25 @@ impl Device {
         }
     }
 
+    /// Fetches the "configuration number" for the active configuration.
+    /// A value of 0 means the device is not configured.
+    pub fn active_configuration(&self) -> UsbResult<u8> {
+        self.backend.active_configuration(&self)
+    }
+
+    /// Attempts to configure the device with the provided configuration number.
+    /// A configuration number of 0 will "unconfigure" the device.
+    pub fn set_active_configuration(&mut self, configuration_index: u8) -> UsbResult<()> {
+        self.backend
+            .set_active_configuration(&self, configuration_index)
+    }
+
+    /// Attempts to place the device into an unconfigured state, in which only EP0 is accessible.
+    /// Equivalent to calling [set_active_configuration] with an argument of 0.
+    pub fn unconfigure(&mut self) -> UsbResult<()> {
+        self.set_active_configuration(0)
+    }
+
     /// Attempts to take ownership of a given interface, claiming it for exclusive access.
     pub fn claim_interface(&mut self, interface_number: u8) -> UsbResult<()> {
         let backend = Rc::clone(&self.backend);
