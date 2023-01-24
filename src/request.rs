@@ -101,7 +101,7 @@ pub const VENDOR_OUT_TO_DEVICE: RequestType = RequestType {
 pub const CLASS_OUT_TO_INTERFACE: RequestType = RequestType {
     direction: Direction::Out,
     request_type: Type::Class,
-    recipient: Recipient::Device,
+    recipient: Recipient::Interface,
 };
 
 /// Shorthand for the somewhat common case of receiving class-specific data from the _interface_.
@@ -109,7 +109,7 @@ pub const CLASS_OUT_TO_INTERFACE: RequestType = RequestType {
 pub const CLASS_IN_FROM_INTERFACE: RequestType = RequestType {
     direction: Direction::In,
     request_type: Type::Class,
-    recipient: Recipient::Device,
+    recipient: Recipient::Interface,
 };
 
 //
