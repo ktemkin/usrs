@@ -1,6 +1,6 @@
 //! Interface for working with USB devices.
 
-use std::{rc::Rc, time::Duration};
+use std::{sync::Arc, time::Duration};
 
 use crate::{
     backend::{Backend, BackendDevice},
@@ -117,7 +117,7 @@ impl DeviceSelector {
 #[allow(dead_code)]
 pub struct Device {
     /// The backend associated with this device.
-    backend: Rc<dyn Backend>,
+    backend: Arc<dyn Backend>,
 
     /// The per-backend inner device interface.
     backend_device: Box<dyn BackendDevice>,
@@ -127,7 +127,7 @@ impl Device {
     /// Attempts to release the current device from its kernel driver.
     /// Not supported on all platforms; unsupported platforms will return [Error::Unsupported].
     pub fn release_kernel_driver(&mut self, interface_number: u8) -> UsbResult<()> {
-        let backend = Rc::clone(&self.backend);
+        let backend = Arc::clone(&self.backend);
         backend.release_kernel_driver(self, interface_number)
     }
 
@@ -137,7 +137,7 @@ impl Device {
     /// operation; allowing this to be safely used for cases where you're more interested in
     /// failures that happen later, e.g. on first real device access.
     pub fn release_kernel_driver_if_possible(&mut self, interface_number: u8) -> UsbResult<()> {
-        let backend = Rc::clone(&self.backend);
+        let backend = Arc::clone(&self.backend);
 
         match backend.release_kernel_driver(self, interface_number) {
             Err(Error::Unsupported) => Ok(()),
@@ -166,13 +166,13 @@ impl Device {
 
     /// Attempts to take ownership of a given interface, claiming it for exclusive access.
     pub fn claim_interface(&mut self, interface_number: u8) -> UsbResult<()> {
-        let backend = Rc::clone(&self.backend);
+        let backend = Arc::clone(&self.backend);
         backend.claim_interface(self, interface_number)
     }
 
     /// Releases ownership of a given interface, allowing it to be claimed by others.
     pub fn unclaim_interface(&mut self, interface_number: u8) -> UsbResult<()> {
-        let backend = Rc::clone(&self.backend);
+        let backend = Arc::clone(&self.backend);
         backend.unclaim_interface(self, interface_number)
     }
 
@@ -693,7 +693,7 @@ impl Device {
     /// you should get your Device from Host::open().
     pub fn from_backend_device(
         backend_device: Box<dyn BackendDevice>,
-        backend: Rc<dyn Backend>,
+        backend: Arc<dyn Backend>,
     ) -> Device {
         Device {
             backend,

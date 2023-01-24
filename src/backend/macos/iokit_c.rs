@@ -585,6 +585,13 @@ pub struct IOUSBDeviceStruct500 {
 }
 pub type IOUSBDeviceInterface500 = IOUSBDeviceStruct500;
 
+// Tweak: these are just function pointers to thread-safe functions,
+// so add send and sync to the C-type. (Calling these from multiple threads
+// may cause odd behavior on the USB bus, though, so we'll still want to wrap the
+// device in Mutex somewhere up from here.)
+unsafe impl Send for IOUSBDeviceInterface500 {}
+unsafe impl Sync for IOUSBDeviceInterface500 {}
+
 #[repr(C)]
 #[derive(Debug, Copy, Clone)]
 pub struct IOUSBInterfaceStruct500 {
@@ -991,3 +998,10 @@ pub struct IOUSBInterfaceStruct500 {
         ) -> IOReturn,
     >,
 }
+
+// Tweak: these are just function pointers to thread-safe functions,
+// so add send and sync to the C-type. (Calling these from multiple threads
+// may cause odd behavior on the USB bus, though, so we'll still want to wrap the
+// device in Mutex somewhere up from here.)
+unsafe impl Send for IOUSBInterfaceStruct500 {}
+unsafe impl Sync for IOUSBInterfaceStruct500 {}

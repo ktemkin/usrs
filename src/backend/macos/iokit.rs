@@ -198,6 +198,11 @@ pub(crate) struct OsDevice {
     is_open: bool,
 }
 
+// We really only have a pointer to something that's already Send,
+// so override Rust's unwillingness to have Send pointers.
+unsafe impl Send for OsDevice {}
+unsafe impl Sync for OsDevice {}
+
 #[allow(dead_code)]
 impl OsDevice {
     pub(crate) fn new(device: *mut *mut UsbDevice) -> Self {
@@ -442,6 +447,11 @@ pub(crate) struct OsInterface {
     /// True iff the interface is currently open.
     is_open: bool,
 }
+
+// We really only have a pointer to something that's already Send,
+// so override Rust's unwillingness to have Send pointers.
+unsafe impl Send for OsInterface {}
+unsafe impl Sync for OsInterface {}
 
 #[allow(dead_code)]
 impl OsInterface {

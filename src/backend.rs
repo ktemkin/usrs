@@ -2,7 +2,7 @@
 //! Backends can (and will) contain unsafe code, but they expose a safe interface here.
 
 use std::any::Any;
-use std::rc::Rc;
+use std::sync::Arc;
 use std::time::{Duration, SystemTime};
 
 use crate::device::{Device, DeviceInformation};
@@ -13,7 +13,7 @@ use crate::{ReadBuffer, WriteBuffer};
 mod macos;
 
 /// Trait that collects methods provided by backend USB-device information.
-pub trait BackendDevice: std::fmt::Debug {
+pub trait BackendDevice: std::fmt::Debug + std::marker::Send + std::marker::Sync {
     fn as_mut_any(&mut self) -> &mut dyn Any;
     fn as_any(&self) -> &dyn Any;
 }
@@ -22,7 +22,7 @@ pub trait BackendDevice: std::fmt::Debug {
 ///
 /// See [Device] for more detailed documentation for many of these methods,
 /// as their signatures are very close to the same.
-pub trait Backend: std::fmt::Debug {
+pub trait Backend: std::fmt::Debug + std::marker::Send + std::marker::Sync {
     /// Returns a collection of device information for all devices present on the system.
     fn get_devices(&self) -> UsbResult<Vec<DeviceInformation>>;
 
@@ -152,6 +152,6 @@ pub trait Backend: std::fmt::Debug {
 
 /// Creates a default backend implementation for MacOS machines.
 #[cfg(target_os = "macos")]
-pub fn create_default_backend() -> UsbResult<Rc<dyn Backend>> {
-    Ok(Rc::new(macos::MacOsBackend::new()?))
+pub fn create_default_backend() -> UsbResult<Arc<dyn Backend>> {
+    Ok(Arc::new(macos::MacOsBackend::new()?))
 }
