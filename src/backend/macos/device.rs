@@ -71,27 +71,9 @@ pub(crate) struct MacOsDevice {
     pub(crate) termination_flag: Arc<AtomicBool>,
 }
 
+unsafe impl Send for MacOsDevice {}
+
 impl MacOsDevice {
-    /*
-    /// Opens an IOKit notification port, providing a RunLoopSource that can be used to
-    /// subscribe to asynchronous event callbacks. This is necessary for properly using the IOKit
-    /// device and interface Async APIs.
-    fn open_notification_source() -> UsbResult<NotificationSource> {
-        unsafe {
-            // First, open a new Mach port to IOKit, which we can use to subscribe to async events.
-            let mut main_port: mach_port_t = 0;
-            UsbResult::from_io_return(IOMasterPort(MACH_PORT_NULL, &mut main_port))?;
-
-            // ... and use that to create a notification port, which we can attach our per-device
-            // and per-interface asynchronous events to.
-            let port = IONotificationPortCreate(main_port);
-            let source = IONotificationPortGetRunLoopSource(port);
-
-            Ok(NotificationSource::new(port, source))
-        }
-    }
-    */
-
     /// Populates the internal list of interfaces. Each interface provides the object we'll need
     /// to perform an operation on its associated non-EP0 endpoint(s).
     fn populate_interfaces(

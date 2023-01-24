@@ -1,6 +1,6 @@
 //! Universal Serial Rust -- tools for working with USB from Rust.
 
-use std::{cell::RefCell, sync::Arc};
+use std::sync::{Arc, RwLock};
 
 pub use device::{DeviceInformation, DeviceSelector};
 pub use error::{Error, UsbResult};
@@ -21,11 +21,11 @@ pub mod futures;
 
 /// Type used for asynchronous read operations.
 #[cfg(feature = "async")]
-pub type ReadBuffer = Arc<RefCell<dyn AsMut<[u8]>>>;
+pub type ReadBuffer = Arc<RwLock<dyn AsMut<[u8]> + Send + Sync>>;
 
 /// Type used for asynchronous write operations.
 #[cfg(feature = "async")]
-pub type WriteBuffer = Arc<dyn AsRef<[u8]>>;
+pub type WriteBuffer = Arc<dyn AsRef<[u8]> + Send + Sync>;
 
 /// Type used for callbacks in the callback-model async functions.
 #[cfg(feature = "callbacks")]

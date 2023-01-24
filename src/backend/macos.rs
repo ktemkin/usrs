@@ -1,9 +1,7 @@
 //! Core, low-level functionality for macOS.
 
 use std::{
-    cell::RefCell,
     ffi::c_void,
-    sync::Arc,
     time::{Duration, SystemTime},
 };
 
@@ -16,7 +14,10 @@ use self::{
 };
 
 use super::{Backend, BackendDevice, DeviceInformation};
-use crate::{backend::macos::iokit_c::IOUSBDevRequestTO, device::Device, error::UsbResult, Error};
+use crate::{
+    backend::macos::iokit_c::IOUSBDevRequestTO, device::Device, error::UsbResult, Error,
+    ReadBuffer, WriteBuffer,
+};
 
 mod callback;
 mod device;
@@ -379,13 +380,13 @@ impl Backend for MacOsBackend {
         request_number: u8,
         value: u16,
         index: u16,
-        target: Arc<RefCell<dyn AsMut<[u8]>>>,
+        target: ReadBuffer,
         callback: Box<CallbackRefconType>,
         timeout: Option<Duration>,
     ) -> UsbResult<()> {
         unsafe {
             // Extract the data we were passed from the user, so we can pass it to IOKit.
-            let mut data_dyn = (*target).borrow_mut();
+            let mut data_dyn = (*target).write().unwrap();
             let data = data_dyn.as_mut();
 
             // If the data is too long for a control request, error out.
@@ -415,7 +416,7 @@ impl Backend for MacOsBackend {
         request_number: u8,
         value: u16,
         index: u16,
-        data: Arc<dyn AsRef<[u8]>>,
+        data: WriteBuffer,
         callback: Box<CallbackRefconType>,
         timeout: Option<Duration>,
     ) -> UsbResult<()> {
@@ -482,7 +483,7 @@ impl Backend for MacOsBackend {
         &self,
         device: &Device,
         endpoint: u8,
-        buffer: Arc<RefCell<dyn AsMut<[u8]>>>,
+        buffer: ReadBuffer,
         callback: Box<dyn FnOnce(UsbResult<usize>)>,
         timeout: Option<Duration>,
     ) -> UsbResult<()> {
@@ -490,7 +491,7 @@ impl Backend for MacOsBackend {
             let (pipe_ref, interface) = self.resources_for_in_endpoint(device, endpoint)?;
 
             // Extract the data we were passed from the user, so we can pass it to IOKit.
-            let mut data_dyn = (*buffer).borrow_mut();
+            let mut data_dyn = (*buffer).write().unwrap();
             let data = data_dyn.as_mut();
 
             if let Some(timeout) = timeout {
@@ -518,7 +519,7 @@ impl Backend for MacOsBackend {
         &self,
         device: &Device,
         endpoint: u8,
-        data: Arc<dyn AsRef<[u8]>>,
+        data: WriteBuffer,
         callback: Box<dyn FnOnce(UsbResult<usize>)>,
         timeout: Option<Duration>,
     ) -> UsbResult<()> {
@@ -549,3 +550,5 @@ impl Backend for MacOsBackend {
         }
     }
 }
+
+unsafe impl Send for MacOsBackend {}

@@ -93,3 +93,5 @@ impl Future for UsbFuture {
         }
     }
 }
+
+unsafe impl Send for UsbFuture {}

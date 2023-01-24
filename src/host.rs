@@ -1,6 +1,6 @@
 //! Abstraction over the OS/host's USB functionality.
 
-use std::rc::Rc;
+use std::sync::Arc;
 
 use crate::backend::{create_default_backend, Backend};
 use crate::device::{Device, DeviceInformation, DeviceSelector};
@@ -10,7 +10,7 @@ use crate::error::{self, UsbResult};
 /// USB devices. This is typically an encapsulation of your OS connection.
 pub struct Host {
     /// The backend used to provide the functions for this Host.
-    backend: Rc<dyn Backend>,
+    backend: Arc<dyn Backend>,
 }
 
 impl Host {
@@ -25,7 +25,7 @@ impl Host {
     /// your backend -- that'll make it our problem, rather than yours~.)
     ///
     /// Most of the time, you want [new].
-    pub fn new_from_backend(backend: Rc<dyn Backend>) -> UsbResult<Self> {
+    pub fn new_from_backend(backend: Arc<dyn Backend>) -> UsbResult<Self> {
         Ok(Host { backend })
     }
 
@@ -79,7 +79,7 @@ impl Host {
         // FIXME: actually open the device, here, instead of having the backend do it?
         Ok(Device::from_backend_device(
             backend_device,
-            Rc::clone(&self.backend),
+            Arc::clone(&self.backend),
         ))
     }
 }
