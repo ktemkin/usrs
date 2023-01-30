@@ -9,22 +9,22 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     env_logger::init();
 
     // Find some device we're interested in working with...
-    let t5_headset_info = device(&DeviceSelector {
-        vendor_id: Some(0x32f8),
-        product_id: Some(0x424c),
+    let device_info = device(&DeviceSelector {
+        vendor_id: Some(0x1d50),
+        product_id: Some(0x615c),
         ..Default::default()
     })?;
 
     // ... open it ...
-    let mut t5_headset = open(&t5_headset_info)?;
+    let mut device = open(&device_info)?;
     println!("\nOpened a device:");
-    dbg!(&t5_headset);
+    dbg!(&device);
 
     //
     // Read the device descriptor synchronously.
     //
 
-    let descriptor = t5_headset.read_standard_descriptor(DescriptorType::Device, 0)?;
+    let descriptor = device.read_standard_descriptor(DescriptorType::Device, 0)?;
     println!("\n\nIts device descriptor, read synchronously:");
     dbg!(descriptor);
 
@@ -33,14 +33,14 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     //
 
     let buffer = usrs::create_read_buffer(1024);
-    let size_read = smol::block_on(t5_headset.read_standard_descriptor_async(
+    let size_read = smol::block_on(device.read_standard_descriptor_async(
         DescriptorType::Device,
         0,
         Arc::clone(&buffer),
     )?)?;
 
     // Extract our buffer from its async encapsulation...
-    let mut buffer = buffer.borrow_mut();
+    let mut buffer = buffer.write().unwrap();
 
     // ... and print it.
     println!("\n\nIts device descriptor, read asynchronously:");
